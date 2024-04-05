@@ -1,0 +1,9 @@
+config("compiler_defaults") {
+    cflags = [
+      "-Wall",
+      "-pedantic",
+      "-Werror",
+    ]
+
+    cflags_cc = ["-std=c++20"]
+}

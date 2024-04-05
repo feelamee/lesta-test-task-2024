@@ -1,0 +1,20 @@
+config("tt") {
+    include_dirs = [
+        "include/"
+    ]
+
+    configs = [
+        "//build:compiler_defaults",
+    ]
+}
+
+executable("tests") {
+    sources = [
+        "tests/tt.test.cpp"
+    ]
+
+    configs = [
+        ":tt"
+    ]
+}
+
