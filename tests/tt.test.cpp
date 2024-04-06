@@ -1,20 +1,39 @@
-#include <tt/tt.hpp> // tt::iseven
+#include <tt/tt.hpp>
 
-#include <cstdlib>     // EXIT_FAILURE, EXIT_SUCCESS, std::size_t
-#include <format>      // std::format
-#include <functional>  // std::invoke
-#include <iostream>    // std::log
-#include <optional>    // std::optional
-#include <string>      // std::string
-#include <string_view> // std::string_view
-#include <utility>     // std::forward
+#include <cstdlib>
+#include <format>
+#include <functional>
+#include <iostream>
+#include <optional>
+#include <source_location>
+#include <string>
+#include <utility>
 
 struct fail_info
 {
-    std::size_t line{ 0 };
-    std::string_view filename;
-    std::string_view function;
-    std::string msg;
+    std::source_location source_info;
+    std::string          msg;
+};
+
+template <>
+struct std::formatter<std::source_location>
+{
+    constexpr auto
+    parse(std::format_parse_context& ctx)
+    {
+        return ctx.begin();
+    }
+
+    auto
+    format(std::source_location const& obj, std::format_context& ctx) const
+    {
+        return std::format_to(ctx.out(),
+                              "{}:{}:{} in '{}'",
+                              obj.file_name(),
+                              obj.line(),
+                              obj.column(),
+                              obj.function_name());
+    }
 };
 
 template <>
@@ -29,25 +48,14 @@ struct std::formatter<fail_info>
     auto
     format(fail_info const& obj, std::format_context& ctx) const
     {
-        return std::format_to(ctx.out(),
-                              "{}:{} in {}\nLastly he said: '{}'",
-                              obj.filename,
-                              obj.line,
-                              obj.function,
-                              obj.msg);
+        return std::format_to(ctx.out(), "{}\nLastly he said: '{}'", obj.source_info, obj.msg);
     }
 };
 
-#define fail(message)                                                          \
-    std::make_optional(fail_info{ .line = __LINE__,                            \
-                                  .filename = __FILE__,                        \
-                                  .function = __func__,                        \
-                                  .msg = (message) })
-
-#define REQUIRE(expr)                                                          \
-    {                                                                          \
-        if ((!expr))                                                           \
-            return fail("'" #expr "' is... lie");                              \
+#define REQUIRE(expr)                                                                              \
+    {                                                                                              \
+        if ((!expr))                                                                               \
+            return fail_info{ std::source_location::current(), "'" #expr "' is... lie" };          \
     }
 
 namespace tests
