@@ -1,6 +1,31 @@
 #pragma once
 
+#include <cstdlib>
+#include <format>
+#include <iostream>
+#include <source_location>
 #include <type_traits>
+
+template <>
+struct std::formatter<std::source_location>
+{
+    constexpr auto
+    parse(std::format_parse_context& ctx)
+    {
+        return ctx.begin();
+    }
+
+    auto
+    format(std::source_location const& obj, std::format_context& ctx) const
+    {
+        return std::format_to(ctx.out(),
+                              "{}:{}:{} in '{}'",
+                              obj.file_name(),
+                              obj.line(),
+                              obj.column(),
+                              obj.function_name());
+    }
+};
 
 namespace tt::detail
 {
@@ -17,5 +42,12 @@ constexpr bool prefer_pass_by_value<T> = false;
 template <typename T>
     requires(!std::is_void_v<T>)
 using param = std::conditional_t<prefer_pass_by_value<T>, T const, T const&>;
+
+[[noreturn]] inline void
+unimplemented(std::source_location src = std::source_location::current())
+{
+    std::cerr << std::format("[unimplemented] {}\n", src);
+    std::exit(EXIT_FAILURE);
+}
 
 } // namespace tt::detail
