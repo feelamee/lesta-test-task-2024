@@ -3,6 +3,12 @@ config("tt") {
         "include/"
     ]
 
+    inputs = [
+        "include/tt/ringbuf.hpp",
+        "include/tt/iseven.hpp",
+        "include/tt/detail.hpp",
+    ]
+
     configs = [
         "//build:compiler_defaults",
     ]
@@ -10,11 +16,12 @@ config("tt") {
 
 executable("tests") {
     sources = [
-        "tests/tt.test.cpp"
+        "tests/main.test.cpp",
     ]
 
     configs = [
-        ":tt"
+        ":tt",
+        "//build:compiler_defaults",
     ]
 }
 
