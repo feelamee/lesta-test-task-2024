@@ -3,6 +3,7 @@ config("compiler_defaults") {
       "-Wall",
       "-pedantic",
       "-Werror",
+      "-Wextra",
     ]
 
     cflags_cc = ["-std=c++20"]
