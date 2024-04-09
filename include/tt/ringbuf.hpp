@@ -1,13 +1,17 @@
 #pragma once
 
+#include <algorithm>
 #include <tt/detail.hpp>
 
 #include <concepts>
-#include <iterator>
-#include <memory>
+#include <optional>
+#include <ranges>
 
 namespace tt
 {
+
+/*
+ */
 
 template <std::semiregular T, typename Alloc = std::allocator<T>>
 class ringbuf
@@ -16,97 +20,141 @@ public:
     using this_type      = ringbuf<T, Alloc>;
     using allocator_type = Alloc;
 
-    using value_type       = std::allocator_traits<allocator_type>::value_type;
-    using param_value_type = detail::param_t<value_type> const;
-    using rvalue_type      = value_type&&;
+    using allocator_traits = std::allocator_traits<allocator_type>;
+    using value_type       = allocator_traits::value_type;
+    // using param_value_type = detail::param<value_type>;
+    // using rvalue_type      = value_type&&;
 
-    using pointer         = std::allocator_traits<allocator_type>::pointer;
-    using const_pointer   = std::allocator_traits<allocator_type>::const_pointer;
-    using reference       = std::allocator_traits<allocator_type>::reference;
-    using const_reference = std::allocator_traits<allocator_type>::const_reference;
+    using pointer = allocator_traits::pointer;
+    // using const_pointer   = allocator_traits::const_pointer;
+    // using reference = allocator_traits::reference;
+    // using const_reference = allocator_traits::const_reference;
 
-    using difference_type = std::allocator_traits<allocator_type>::difference_type;
-    using size_type       = std::allocator_traits<allocator_type>::size_type;
-    using capacity_type   = size_type;
+    using difference_type = allocator_traits::difference_type;
+    using size_type       = allocator_traits::size_type;
 
-    using iterator               = std::iterator_traits<this_type>;
-    using reverse_iterator       = std::reverse_iterator<iterator>;
-    using const_iterator         = std::iterator_traits<this_type>;
-    using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+    ringbuf(size_type sz, allocator_type const& alloc = allocator_type())
+        : bufsize{ sz }, allocator{ alloc }
+    {
+        buf   = allocator_traits::allocate(allocator, sz);
+        write = buf;
+        read  = buf;
+    }
 
-    explicit ringbuf(allocator_type const& = allocator_type()) noexcept;
-    explicit ringbuf(capacity_type, allocator_type const& = allocator_type());
-    ringbuf(size_type, param_value_type, allocator_type const& = allocator_type());
-    ringbuf(capacity_type, size_type, param_value_type, allocator_type const& = allocator_type());
     ringbuf(this_type const&);
     ringbuf(this_type&&) noexcept;
 
-    template <std::input_iterator It>
-    ringbuf(It, It, allocator_type const& = allocator_type());
-    template <std::input_iterator It>
-    ringbuf(capacity_type, It, It, allocator_type const& = allocator_type());
+    this_type&
+    operator=(this_type other) noexcept
+    {
+        swap(*this, other);
+        return *this;
+    }
 
-    this_type& operator=(const this_type&);
-    this_type& operator=(this_type&&) noexcept;
-    ~ringbuf();
+    ~ringbuf()
+    {
+        clear();
+        allocator_traits::deallocate(allocator, buf, bufsize);
+    }
 
-    allocator_type  get_allocator() const noexcept;
-    allocator_type& get_allocator() noexcept;
+    allocator_type
+    get_allocator() const noexcept
+    {
+        return allocator;
+    }
 
-    iterator         begin() noexcept;
-    reverse_iterator rbegin() noexcept;
-    iterator         end() noexcept;
-    reverse_iterator rend() noexcept;
+    allocator_type&
+    get_allocator() noexcept
+    {
+        return allocator;
+    }
 
-    const_iterator         begin() const noexcept;
-    const_iterator         end() const noexcept;
-    const_reverse_iterator rbegin() const noexcept;
-    const_reverse_iterator rend() const noexcept;
+    size_type
+    size() const noexcept
+    {
+        difference_type diff = write - read;
+        return diff > 0 ? diff : bufsize - diff;
+    }
 
-    reference       operator[](size_type);
-    const_reference operator[](size_type) const;
+    size_type
+    max_size() const noexcept
+    {
+        return allocator_traits::max_size(allocator);
+    }
 
-    reference       at(size_type);
-    const_reference at(size_type) const;
+    bool
+    empty() const noexcept
+    {
+        return write == read;
+    }
 
-    reference front();
-    reference back();
+    bool
+    full() const noexcept
+    {
+        difference_type diff = write - read;
+        return diff == (diff < 0 ? 1 : bufsize);
+    }
+    size_type
+    reserve() const noexcept
+    {
+        return bufsize - size();
+    }
 
-    const_reference front() const;
-    const_reference back() const;
+    template <std::ranges::input_range R>
+    void assign(std::ranges::ref_view<R>);
 
-    size_type     size() const noexcept;
-    size_type     max_size() const noexcept;
-    bool          empty() const noexcept;
-    bool          full() const noexcept;
-    size_type     reserve() const noexcept;
-    capacity_type capacity() const noexcept;
-    void          set_capacity(capacity_type);
-    void          resize(size_type, param_value_type = value_type());
-    void          assign(size_type, param_value_type);
-    template <std::input_iterator It>
-    void assign(It, It);
-    void swap(this_type&) noexcept;
+    template <std::ranges::input_range R>
+    void assign(std::ranges::owning_view<R>);
 
-    void     push_back(param_value_type);
-    void     push_back(rvalue_type);
-    void     push_back();
-    void     push_front(param_value_type);
-    void     push_front(rvalue_type);
-    void     push_front();
-    void     pop_back();
-    void     pop_front();
-    iterator insert(iterator, param_value_type);
-    iterator insert(iterator, rvalue_type);
-    iterator insert(iterator);
-    void     insert(iterator, size_type, param_value_type);
-    template <std::input_iterator It>
-    void     insert(iterator, It, It);
-    iterator erase(iterator);
-    iterator erase(iterator, iterator);
-    void     clear() noexcept;
+    friend void
+    swap(this_type& lhs, this_type& rhs) noexcept(noexcept(swap(lhs.allocator, rhs.allocator)))
+    {
+        using std::swap;
+
+        swap(lhs.buf, rhs.buf);
+        swap(lhs.bufsize, rhs.bufsize);
+        swap(lhs.allocator, rhs.allocator);
+
+        swap(lhs.write, rhs.write);
+        swap(lhs.read, rhs.read);
+    }
+
+    template <std::ranges::input_range R>
+    void push(std::ranges::ref_view<R>);
+
+    template <std::ranges::input_range R>
+    void push(std::ranges::owning_view<R>);
+
+    std::ranges::owning_view<std::span<value_type>> pop(size_type);
+
+    void
+    clear() noexcept
+    {
+        difference_type diff = write - read;
+        if (diff > 0)
+        {
+            destroy(read, diff);
+        }
+        else if (diff < 0)
+        {
+            destroy(buf, write - buf);
+            destroy(read, bufsize - (read - buf));
+        }
+    }
 
 private:
+    void
+    destroy(pointer const p, size_type const n) noexcept
+    {
+        std::for_each(p, p + n, [this](pointer ptr) { allocator_traits::destroy(allocator, ptr); });
+    }
+
+    pointer        buf{ nullptr };
+    size_type      bufsize{ 0 };
+    allocator_type allocator;
+
+    pointer write{ nullptr };
+    pointer read{ nullptr };
 };
 
 } // namespace tt

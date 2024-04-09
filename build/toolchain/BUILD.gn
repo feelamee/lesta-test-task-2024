@@ -1,12 +1,12 @@
 toolchain("clang") {
   tool("cc") {
-    command = "clang {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c \$(realpath {{source}}) -o {{output}}"
+    command = "clang {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
     description = "CC {{output}}"
     outputs =
         [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
   }
   tool("cxx") {
-    command = "clang++ {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c \$(realpath {{source}}) -o {{output}}"
+    command = "clang++ {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
     description = "CXX {{output}}"
     outputs =
         [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
