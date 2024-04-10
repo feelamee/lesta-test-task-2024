@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <format>
 #include <iostream>
+#include <limits>
 #include <source_location>
 #include <type_traits>
 
