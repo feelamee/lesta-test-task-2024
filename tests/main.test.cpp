@@ -83,7 +83,7 @@ constexpr std::array tests = {
         }
 
         {
-            struct custom_allocator : std::allocator<value_type>
+            struct custom_allocator : public std::allocator<value_type>
             {
                 int id;
             };
@@ -94,10 +94,29 @@ constexpr std::array tests = {
             REQUIRE(alloc2.id != buf.get_allocator().id);
         }
     }
+    {
+        tt::ringbuf<int> buf(1);
+        // REQUIRE(buf.begin() == buf.end());
+    }
+    {
+        // tt::ringbuf<int> buf1(1);
+        {
+            // tt::ringbuf<int> buf2 = buf1;
+            // buf2.emplace(5);
+            // REQUIRE(buf1 != buf2);
+        }
+        {
+            // auto buf2 = buf1;
+            // buf2.emplace(5);
+            // auto buf3 = buf2;
+            // buf2.emplace(5);
+            // REQUIRE(buf3 == buf2);
+        }
+
+    }
     return std::nullopt;
 }
     // clang-format on
-
 };
 
 int

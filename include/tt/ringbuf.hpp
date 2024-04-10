@@ -1,9 +1,10 @@
 #pragma once
 
-#include <memory>
+#include <iterator>
 #include <tt/detail.hpp>
 
 #include <algorithm>
+#include <memory>
 #include <ranges>
 #include <utility>
 
@@ -19,13 +20,13 @@ public:
 
     using allocator_traits = std::allocator_traits<allocator_type>;
     using value_type = allocator_traits::value_type;
-    // using param_value_type = detail::param<value_type>;
-    // using rvalue_type      = value_type&&;
+    using param_value_type = detail::param<value_type>;
+    using rvalue_type = value_type&&;
 
-    using pointer = allocator_traits::pointer;
-    // using const_pointer   = allocator_traits::const_pointer;
-    // using reference = allocator_traits::reference;
-    // using const_reference = allocator_traits::const_reference;
+    using pointer = value_type*;
+    using const_pointer = value_type const*;
+    using reference = value_type&;
+    using const_reference = value_type const&;
 
     using difference_type = allocator_traits::difference_type;
     using size_type = allocator_traits::size_type;
@@ -34,8 +35,8 @@ public:
         : bufsize{ sz }, allocator{ alloc }
     {
         buf = allocator_traits::allocate(allocator, sz);
-        write = buf;
-        read = buf;
+        towrite = buf;
+        toread = buf;
     }
 
     ringbuf(this_type const&) { detail::unimplemented(); }
@@ -69,7 +70,7 @@ public:
     size_type
     size() const noexcept
     {
-        difference_type const diff = write - read;
+        difference_type const diff = towrite - toread;
         return diff >= 0 ? diff : bufsize + diff;
     }
 
@@ -82,13 +83,13 @@ public:
     bool
     empty() const noexcept
     {
-        return write == read;
+        return towrite == toread;
     }
 
     bool
     full() const noexcept
     {
-        difference_type const diff = write - read;
+        difference_type const diff = towrite - toread;
         return std::cmp_equal(diff, (diff >= 0 ? bufsize : -1));
     }
     size_type
@@ -120,25 +121,45 @@ public:
         swap(lhs.bufsize, rhs.bufsize);
         swap(lhs.allocator, rhs.allocator);
 
-        swap(lhs.write, rhs.write);
-        swap(lhs.read, rhs.read);
+        swap(lhs.towrite, rhs.towrite);
+        swap(lhs.toread, rhs.toread);
     }
 
-    template <std::ranges::input_range R>
     void
-    push(std::ranges::ref_view<R>)
+    emplace(const_reference v)
     {
-        detail::unimplemented();
+        emplace(value_type{ v });
     }
 
-    template <std::ranges::input_range R>
     void
-    push(std::ranges::owning_view<R>)
+    emplace(auto&&... v)
+        requires std::is_constructible_v<value_type, decltype(v)...>
     {
-        detail::unimplemented();
+        if (towrite == toread)
+        {
+            (*toread) = value_type{ std::forward<decltype(v)>(v)... };
+        }
+        else
+        {
+            allocator_traits::construct(allocator, towrite, std::forward<decltype(v)>(v)...);
+        }
+        towrite = next(towrite);
+        // detail::unimplemented();
     }
 
-    std::ranges::owning_view<std::span<value_type>>
+    void
+    emplace(std::ranges::input_range auto const& rng)
+    {
+        std::ranges::for_each(rng, [](auto const&) { detail::unimplemented(); });
+    }
+
+    void
+    emplace(std::ranges::input_range auto&& rng)
+    {
+        std::ranges::for_each(rng, [](auto&&) { detail::unimplemented(); });
+    }
+
+    value_type
     pop(size_type)
     {
         detail::unimplemented();
@@ -149,31 +170,168 @@ public:
     {
         using std::ranges::destroy_n;
 
-        difference_type const diff = write - read;
+        difference_type const diff = towrite - toread;
         if (diff > 0)
         {
-            destroy_n(read, diff);
+            destroy_n(toread, diff);
         }
         else if (diff < 0)
         {
-            destroy_n(buf, write - buf);
-            destroy_n(read, bufsize - (read - buf));
+            destroy_n(buf, towrite - buf);
+            destroy_n(toread, bufsize - (toread - buf));
         }
     }
 
-    friend bool
-    operator==(this_type const&, this_type const&)
+    struct iterator;
+
+    iterator
+    begin() const noexcept
     {
         detail::unimplemented();
     }
 
+    iterator
+    end() const noexcept
+    {
+        detail::unimplemented();
+    }
+
+    friend bool
+    operator==(this_type const& lhs, this_type const& rhs)
+    {
+        if (lhs.size() != rhs.size())
+            return false;
+
+        detail::unimplemented();
+    }
+
 private:
+    // too bad...
+    constexpr pointer
+    next(pointer p) const
+    {
+        if (nullptr == p)
+            return buf;
+
+        ++p;
+        if (p > buf + bufsize)
+            p -= bufsize;
+
+        return p;
+    }
+
     pointer buf{ nullptr };
     size_type bufsize{ 0 };
     allocator_type allocator;
 
-    pointer write{ nullptr };
-    pointer read{ nullptr };
+    pointer towrite{ nullptr };
+    pointer toread{ nullptr };
 };
+
+template <std::semiregular T, typename Alloc>
+struct ringbuf<T, Alloc>::iterator
+{
+    using this_type = iterator;
+    using container_type = ringbuf<T, Alloc>;
+
+    using value_type = container_type::value_type;
+    using difference_type = container_type::difference_type;
+    using reference = container_type::reference;
+    using pointer = container_type::pointer;
+    // using size_type = allocator_traits::size_type;
+
+    reference
+    operator*() const
+    {
+        detail::unimplemented();
+    }
+
+    pointer
+    operator->()
+    {
+        detail::unimplemented();
+    }
+
+    this_type&
+    operator++()
+    {
+        detail::unimplemented();
+    }
+
+    this_type
+    operator++(int)
+    {
+        detail::unimplemented();
+    }
+
+    this_type&
+    operator--()
+    {
+        detail::unimplemented();
+    }
+
+    this_type
+    operator--(int)
+    {
+        detail::unimplemented();
+    }
+
+    friend difference_type
+    operator-(this_type, this_type)
+    {
+        detail::unimplemented();
+    };
+
+    friend iterator
+    operator+(this_type, difference_type)
+    {
+        detail::unimplemented();
+    };
+
+    friend iterator
+    operator+(difference_type, this_type)
+    {
+        detail::unimplemented();
+    };
+
+    friend iterator
+    operator-(this_type, difference_type)
+    {
+        detail::unimplemented();
+    };
+
+    this_type&
+    operator+=(difference_type)
+    {
+        detail::unimplemented();
+    };
+
+    this_type&
+    operator-=(difference_type)
+    {
+        detail::unimplemented();
+    };
+
+    friend bool
+    operator==(this_type, this_type)
+    {
+        detail::unimplemented();
+    };
+
+    friend bool
+    operator!=(this_type, this_type)
+    {
+        detail::unimplemented();
+    };
+
+    reference
+    operator[](size_type) const noexcept
+    {
+        detail::unimplemented();
+    };
+
+    friend constexpr auto operator<=>(this_type, this_type) = default;
+};
+static_assert(std::random_access_iterator<ringbuf<int>::iterator>);
 
 } // namespace tt
