@@ -1,6 +1,5 @@
 #pragma once
 
-#include <iterator>
 #include <tt/detail.hpp>
 
 #include <algorithm>
@@ -39,8 +38,8 @@ public:
         toread = buf;
     }
 
-    ringbuf(this_type const&) { detail::unimplemented(); }
-    ringbuf(this_type&&) noexcept { detail::unimplemented(); }
+    ringbuf(this_type const& other) { assign(other); }
+    ringbuf(this_type&& other) noexcept { assign(std::forward<this_type>(other)); }
 
     this_type&
     operator=(this_type other) noexcept
@@ -100,16 +99,20 @@ public:
 
     template <std::ranges::input_range R>
     void
-    assign(std::ranges::ref_view<R>)
+    assign(std::ranges::ref_view<R> other)
     {
-        detail::unimplemented();
+        clear();
+        for (auto const& i : other)
+            emplace(i);
     }
 
     template <std::ranges::input_range R>
     void
-    assign(std::ranges::owning_view<R>)
+    assign(std::ranges::owning_view<R> other)
     {
-        detail::unimplemented();
+        clear();
+        for (auto&& i : other)
+            emplace(std::forward<decltype(i)>(i));
     }
 
     friend void
@@ -126,37 +129,33 @@ public:
     }
 
     void
-    emplace(const_reference v)
+    emplace(auto&&... args)
+        requires std::is_constructible_v<value_type, decltype(args)...>
     {
-        emplace(value_type{ v });
-    }
-
-    void
-    emplace(auto&&... v)
-        requires std::is_constructible_v<value_type, decltype(v)...>
-    {
+        detail::unimplemented();
         if (towrite == toread)
         {
-            (*toread) = value_type{ std::forward<decltype(v)>(v)... };
+            (*toread) = value_type{ std::forward<decltype(args)>(args)... };
         }
         else
         {
-            allocator_traits::construct(allocator, towrite, std::forward<decltype(v)>(v)...);
+            allocator_traits::construct(allocator, towrite, std::forward<decltype(args)>(args)...);
         }
         towrite = next(towrite);
-        // detail::unimplemented();
     }
 
+    template <std::ranges::input_range R>
     void
-    emplace(std::ranges::input_range auto const& rng)
+    emplace(std::ranges::ref_view<R> view)
     {
-        std::ranges::for_each(rng, [](auto const&) { detail::unimplemented(); });
+        std::ranges::for_each(view, [this](auto const& i) { emplace(i); });
     }
 
+    template <std::ranges::input_range R>
     void
-    emplace(std::ranges::input_range auto&& rng)
+    emplace(std::ranges::owning_view<R> view)
     {
-        std::ranges::for_each(rng, [](auto&&) { detail::unimplemented(); });
+        std::ranges::for_each(view, [this](auto&& i) { emplace(std::forward<decltype(i)>(i)); });
     }
 
     value_type
@@ -180,20 +179,23 @@ public:
             destroy_n(buf, towrite - buf);
             destroy_n(toread, bufsize - (toread - buf));
         }
+        toread = nullptr;
+        towrite = nullptr;
     }
 
+    template <bool IsConst>
     struct iterator;
 
-    iterator
+    iterator<false>
     begin() const noexcept
     {
-        detail::unimplemented();
+        return iterator{ read };
     }
 
-    iterator
+    iterator<false>
     end() const noexcept
     {
-        detail::unimplemented();
+        return iterator{ write };
     }
 
     friend bool
@@ -229,109 +231,129 @@ private:
 };
 
 template <std::semiregular T, typename Alloc>
+template <bool IsConst>
 struct ringbuf<T, Alloc>::iterator
 {
-    using this_type = iterator;
+private:
     using container_type = ringbuf<T, Alloc>;
 
+public:
+    using this_type = iterator;
     using value_type = container_type::value_type;
     using difference_type = container_type::difference_type;
-    using reference = container_type::reference;
+    using reference = detail::const_if<IsConst, container_type::reference>;
     using pointer = container_type::pointer;
-    // using size_type = allocator_traits::size_type;
 
-    reference
-    operator*() const
-    {
-        detail::unimplemented();
-    }
-
-    pointer
-    operator->()
-    {
-        detail::unimplemented();
-    }
+    iterator() = default;
+    iterator(pointer p_p) : p{ p_p } {}
 
     this_type&
-    operator++()
+    operator+=(difference_type n)
     {
-        detail::unimplemented();
-    }
+        p += n;
+        return *this;
+    };
 
-    this_type
-    operator++(int)
+    friend iterator
+    operator+(this_type it, difference_type n)
     {
-        detail::unimplemented();
-    }
+        auto temp = it;
+        return it += n;
+    };
+
+    friend iterator
+    operator+(difference_type n, this_type it)
+    {
+        return it + n;
+    };
+
+    this_type&
+    operator-=(difference_type n)
+    {
+        return (*this) += -n;
+    };
+
+    friend iterator
+    operator-(this_type it, difference_type n)
+    {
+        return it + (-n);
+    };
+
+    friend difference_type
+    operator-(this_type l, this_type r)
+    {
+        assert(l == r + (l - r));
+        return l - r;
+    };
+
+    reference
+    operator[](size_type i) const noexcept
+    {
+        return *((*this) + i);
+    };
+
+    friend constexpr auto operator<=>(this_type, this_type) = default;
 
     this_type&
     operator--()
     {
-        detail::unimplemented();
+        --p;
+        return *this;
     }
 
     this_type
     operator--(int)
     {
-        detail::unimplemented();
+        this_type ret{ *this };
+        --(*this);
+        return ret;
     }
 
-    friend difference_type
-    operator-(this_type, this_type)
+    reference
+    operator*() const
     {
-        detail::unimplemented();
-    };
-
-    friend iterator
-    operator+(this_type, difference_type)
-    {
-        detail::unimplemented();
-    };
-
-    friend iterator
-    operator+(difference_type, this_type)
-    {
-        detail::unimplemented();
-    };
-
-    friend iterator
-    operator-(this_type, difference_type)
-    {
-        detail::unimplemented();
-    };
-
-    this_type&
-    operator+=(difference_type)
-    {
-        detail::unimplemented();
-    };
-
-    this_type&
-    operator-=(difference_type)
-    {
-        detail::unimplemented();
-    };
-
-    friend bool
-    operator==(this_type, this_type)
-    {
-        detail::unimplemented();
-    };
-
-    friend bool
-    operator!=(this_type, this_type)
-    {
-        detail::unimplemented();
-    };
+        return *p;
+    }
 
     reference
-    operator[](size_type) const noexcept
+    operator->()
     {
-        detail::unimplemented();
+        return *p;
+    }
+
+    this_type&
+    operator++()
+    {
+
+        return ++p;
+    }
+
+    this_type
+    operator++(int)
+    {
+        this_type ret{ p };
+        ++(*this);
+        return ret;
+    }
+
+    friend bool
+    operator==(this_type l, this_type r)
+    {
+        return l.p == r.p;
     };
 
-    friend constexpr auto operator<=>(this_type, this_type) = default;
+    friend bool
+    operator!=(this_type l, this_type r)
+    {
+        return not(l == r);
+    };
+
+private:
+    pointer p{ nullptr };
 };
-static_assert(std::random_access_iterator<ringbuf<int>::iterator>);
+static_assert(std::random_access_iterator<ringbuf<int>::iterator<false>>);
+static_assert(std::random_access_iterator<ringbuf<int>::iterator<true>>);
+static_assert(std::sentinel_for<ringbuf<int>::iterator<false>, ringbuf<int>::iterator<false>>);
+static_assert(std::sentinel_for<ringbuf<int>::iterator<true>, ringbuf<int>::iterator<true>>);
 
 } // namespace tt
