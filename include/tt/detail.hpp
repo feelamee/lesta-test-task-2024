@@ -44,9 +44,6 @@ template <typename T>
     requires(!std::is_void_v<T>)
 using param = std::conditional_t<prefer_pass_by_value<T>, T const, T const&>;
 
-template <bool IsConst, typename T>
-using const_if = std::conditional_t<IsConst, T const, T>;
-
 [[noreturn]] inline void
 unimplemented(std::source_location src = std::source_location::current())
 {

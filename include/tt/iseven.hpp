@@ -11,7 +11,7 @@ namespace tt
        bool isEven(int value){return value%2==0;}
     ```
     is that 1 use feature of hardware - binary representaion,
-    it will not work on 3bit processor, haha)
+    it will not work on trinary processor, haha)
     and 2 use mathematical definition of even numbers
 
     Theoreticaly, 1 will be faster.
