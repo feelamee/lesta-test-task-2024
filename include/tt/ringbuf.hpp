@@ -3,6 +3,8 @@
 #include <tt/detail.hpp>
 
 #include <algorithm>
+#include <compare>
+#include <iterator>
 #include <memory>
 #include <ranges>
 #include <utility>
@@ -22,24 +24,45 @@ public:
     using param_value_type = detail::param<value_type>;
     using rvalue_type = value_type&&;
 
-    using pointer = value_type*;
-    using const_pointer = value_type const*;
+    using pointer = allocator_traits::pointer;
+    using const_pointer = allocator_traits::const_pointer;
     using reference = value_type&;
     using const_reference = value_type const&;
 
     using difference_type = allocator_traits::difference_type;
     using size_type = allocator_traits::size_type;
 
-    ringbuf(size_type sz, allocator_type const& alloc = allocator_type())
-        : bufsize{ sz }, allocator{ alloc }
+private:
+    void
+    init_with_capacity_and_allocator(size_type sz, allocator_type const& alloc = allocator_type())
     {
-        buf = allocator_traits::allocate(allocator, sz);
-        towrite = buf;
-        toread = buf;
+        m_allocator = alloc;
+
+        m_buf = allocator_traits::allocate(get_allocator(), sz);
+        m_end = m_buf + sz;
+
+        m_last = m_buf;
+        m_first = m_buf;
+
+        m_size = 0;
     }
 
-    ringbuf(this_type const& other) { assign(other); }
-    ringbuf(this_type&& other) noexcept { assign(std::forward<this_type>(other)); }
+public:
+    ringbuf(size_type sz, allocator_type const& alloc = allocator_type()) : m_allocator{ alloc }
+    {
+        init_with_capacity_and_allocator(sz, alloc);
+    }
+
+    ringbuf(this_type const& other)
+    {
+        init_with_capacity_and_allocator(other.capacity(), other.get_allocator());
+        assign(std::ranges::ref_view(other));
+    }
+    ringbuf(this_type&& other) noexcept
+    {
+        init_with_capacity_and_allocator(other.capacity(), other.get_allocator());
+        assign(std::ranges::owning_view(std::forward<this_type>(other)));
+    }
 
     this_type&
     operator=(this_type other) noexcept
@@ -51,115 +74,133 @@ public:
     ~ringbuf()
     {
         clear();
-        allocator_traits::deallocate(allocator, buf, bufsize);
+        allocator_traits::deallocate(m_allocator, m_buf, capacity());
     }
 
     allocator_type
     get_allocator() const noexcept
     {
-        return allocator;
+        return m_allocator;
     }
 
     allocator_type&
     get_allocator() noexcept
     {
-        return allocator;
+        return m_allocator;
     }
 
     size_type
     size() const noexcept
     {
-        difference_type const diff = towrite - toread;
-        return diff >= 0 ? diff : bufsize + diff;
+        return m_size;
+    }
+
+    size_type
+    capacity() const noexcept
+    {
+        return m_end - m_buf;
     }
 
     size_type
     max_size() const noexcept
     {
-        return allocator_traits::max_size(allocator);
+        return allocator_traits::max_size(m_allocator);
     }
 
     bool
     empty() const noexcept
     {
-        return towrite == toread;
+        return 0 == size();
     }
 
     bool
     full() const noexcept
     {
-        difference_type const diff = towrite - toread;
-        return std::cmp_equal(diff, (diff >= 0 ? bufsize : -1));
+        return capacity() == size();
     }
+
     size_type
     reserve() const noexcept
     {
-        return bufsize - size();
+        return capacity() - size();
     }
 
-    template <std::ranges::input_range R>
     void
-    assign(std::ranges::ref_view<R> other)
+    assign(std::ranges::input_range auto&& other)
     {
         clear();
-        for (auto const& i : other)
-            emplace(i);
-    }
-
-    template <std::ranges::input_range R>
-    void
-    assign(std::ranges::owning_view<R> other)
-    {
-        clear();
-        for (auto&& i : other)
-            emplace(std::forward<decltype(i)>(i));
+        append_range(std::forward<decltype(other)>(other));
     }
 
     friend void
-    swap(this_type& lhs, this_type& rhs) noexcept(noexcept(swap(lhs.allocator, rhs.allocator)))
+    swap(this_type& lhs, this_type& rhs) noexcept(noexcept(swap(lhs.m_allocator, rhs.m_allocator)))
     {
         using std::swap;
 
-        swap(lhs.buf, rhs.buf);
+        swap(lhs.m_buf, rhs.m_buf);
         swap(lhs.bufsize, rhs.bufsize);
-        swap(lhs.allocator, rhs.allocator);
+        swap(lhs.m_allocator, rhs.m_allocator);
 
-        swap(lhs.towrite, rhs.towrite);
-        swap(lhs.toread, rhs.toread);
+        swap(lhs.m_last, rhs.m_last);
+        swap(lhs.m_first, rhs.m_first);
     }
 
     void
-    emplace(auto&&... args)
+    push_back(param_value_type value)
+    {
+        emplace_back(value);
+    }
+
+    void
+    emplace_back(auto&&... args)
         requires std::is_constructible_v<value_type, decltype(args)...>
     {
-        detail::unimplemented();
-        if (towrite == toread)
+        if (full())
         {
-            (*toread) = value_type{ std::forward<decltype(args)>(args)... };
+            if (empty())
+                return;
+
+            (*m_last) = value_type{ std::forward<decltype(args)>(args)... };
+            increment(m_last);
+            m_first = m_last;
         }
         else
         {
-            allocator_traits::construct(allocator, towrite, std::forward<decltype(args)>(args)...);
+            allocator_traits::construct(
+                get_allocator(), m_last, std::forward<decltype(args)>(args)...);
+            increment(m_last);
+            ++m_size;
         }
-        towrite = next(towrite);
+    }
+
+    // TODO: specialize for `sized_range` using `drop(size(view) - capacity())`
+    template <std::ranges::input_range R>
+    void
+    append_range(std::ranges::ref_view<R> view)
+    {
+        std::ranges::copy(view, std::back_inserter(*this));
     }
 
     template <std::ranges::input_range R>
     void
-    emplace(std::ranges::ref_view<R> view)
+    append_range(std::ranges::owning_view<R> view)
     {
-        std::ranges::for_each(view, [this](auto const& i) { emplace(i); });
+        std::ranges::move(view, std::back_inserter(*this));
     }
 
-    template <std::ranges::input_range R>
-    void
-    emplace(std::ranges::owning_view<R> view)
+    std::optional<value_type>
+    pop_back()
     {
-        std::ranges::for_each(view, [this](auto&& i) { emplace(std::forward<decltype(i)>(i)); });
+        if (size() < 1)
+            return std::nullopt;
+
+        auto ret{ *m_last };
+        decrement(m_last);
+        return ret;
     }
 
-    value_type
-    pop(size_type)
+    std::optional<value_type>
+    pop_front()
     {
         detail::unimplemented();
     }
@@ -169,33 +210,49 @@ public:
     {
         using std::ranges::destroy_n;
 
-        difference_type const diff = towrite - toread;
-        if (diff > 0)
-        {
-            destroy_n(toread, diff);
-        }
-        else if (diff < 0)
-        {
-            destroy_n(buf, towrite - buf);
-            destroy_n(toread, bufsize - (toread - buf));
-        }
-        toread = nullptr;
-        towrite = nullptr;
+        std::destroy(begin(), end());
+        m_first = m_buf;
+        m_last = m_buf;
+        m_size = 0;
     }
 
     template <bool IsConst>
     struct iterator;
 
     iterator<false>
+    begin() noexcept
+    {
+        return { this, empty() ? nullptr : m_first };
+    }
+
+    iterator<true>
     begin() const noexcept
     {
-        return iterator{ read };
+        return { this, empty() ? nullptr : m_first };
     }
 
     iterator<false>
+    end() noexcept
+    {
+        return { this, nullptr };
+    }
+
+    iterator<true>
     end() const noexcept
     {
-        return iterator{ write };
+        return { this, nullptr };
+    }
+
+    iterator<true>
+    cbegin() const noexcept
+    {
+        return begin();
+    }
+
+    iterator<true>
+    cend() const noexcept
+    {
+        return end();
     }
 
     friend bool
@@ -204,30 +261,47 @@ public:
         if (lhs.size() != rhs.size())
             return false;
 
-        detail::unimplemented();
+        return std::equal(lhs.begin(), lhs.end(), rhs.begin());
     }
 
-private:
-    // too bad...
-    constexpr pointer
-    next(pointer p) const
+    // private:
+public:
+    void
+    increment(auto& p) const
     {
-        if (nullptr == p)
-            return buf;
-
-        ++p;
-        if (p > buf + bufsize)
-            p -= bufsize;
-
-        return p;
+        if (++p == m_end)
+            p = m_buf;
     }
 
-    pointer buf{ nullptr };
-    size_type bufsize{ 0 };
-    allocator_type allocator;
+    void
+    decrement(auto& p) const
+    {
+        if (p == m_buf)
+            p = m_end;
+        --p;
+    }
 
-    pointer towrite{ nullptr };
-    pointer toread{ nullptr };
+    template <typename Pointer>
+    Pointer
+    add(Pointer p, difference_type n) const
+    {
+        return p + (n < (m_end - p) ? n : n - capacity());
+    }
+
+    template <class Pointer>
+    Pointer
+    sub(Pointer p, difference_type n) const
+    {
+        return p - (n > (p - m_buf) ? n - capacity() : n);
+    }
+
+    pointer m_buf{ nullptr };
+    pointer m_end{ 0 };
+    allocator_type m_allocator;
+
+    pointer m_last{ nullptr };
+    pointer m_first{ nullptr };
+    size_type m_size{ 0 };
 };
 
 template <std::semiregular T, typename Alloc>
@@ -239,66 +313,97 @@ private:
 
 public:
     using this_type = iterator;
+    using const_self = iterator<true>;
     using value_type = container_type::value_type;
     using difference_type = container_type::difference_type;
-    using reference = detail::const_if<IsConst, container_type::reference>;
-    using pointer = container_type::pointer;
+    using reference =
+        std::conditional_t<IsConst, container_type::const_reference, container_type::reference>;
+    using pointer =
+        std::conditional_t<IsConst, container_type::const_pointer, container_type::pointer>;
+
+    pointer m_ptr{ nullptr };
+    const container_type* m_buf{ nullptr };
 
     iterator() = default;
-    iterator(pointer p_p) : p{ p_p } {}
-
-    this_type&
-    operator+=(difference_type n)
+    iterator(container_type const* const p_buf, value_type* p_ptr) : m_ptr{ p_ptr }, m_buf{ p_buf }
     {
-        p += n;
-        return *this;
-    };
+    }
+
+    iterator(this_type const&) = default;
+    iterator(this_type&&) = default;
+    iterator& operator=(this_type const&) = default;
+    iterator& operator=(this_type&&) = default;
+
+    friend this_type&
+    operator+=(this_type& it, difference_type n)
+    {
+        if (n > 0)
+        {
+            it.m_ptr = it.m_buf->add(it.m_ptr, n);
+            if (it.m_ptr == it.m_buf->m_last)
+                it.m_ptr = nullptr;
+        }
+        else if (n < 0)
+        {
+            it -= -n;
+        }
+        return it;
+    }
 
     friend iterator
     operator+(this_type it, difference_type n)
     {
-        auto temp = it;
         return it += n;
-    };
+    }
 
     friend iterator
     operator+(difference_type n, this_type it)
     {
         return it + n;
-    };
+    }
 
     this_type&
     operator-=(difference_type n)
     {
-        return (*this) += -n;
-    };
+        if (n > 0)
+        {
+            m_ptr = m_buf->sub(nullptr == m_ptr ? m_buf->m_last : m_ptr, n);
+        }
+        else if (n < 0)
+        {
+            *this += -n;
+        }
+        return *this;
+    }
 
     friend iterator
     operator-(this_type it, difference_type n)
     {
-        return it + (-n);
-    };
+        return it -= n;
+    }
 
     friend difference_type
-    operator-(this_type l, this_type r)
+    operator-(this_type lhs, this_type rhs)
     {
-        assert(l == r + (l - r));
-        return l - r;
-    };
+        return linearize_pointer(lhs) - linearize_pointer(rhs);
+    }
 
     reference
-    operator[](size_type i) const noexcept
+    operator[](size_type n) const noexcept
     {
-        return *((*this) + i);
-    };
+        return *((*this) + n);
+    }
 
-    friend constexpr auto operator<=>(this_type, this_type) = default;
+    friend std::strong_ordering // weak or strong?
+    operator<=>(this_type lhs, this_type rhs)
+    {
+        return linearize_pointer(lhs) <=> linearize_pointer(rhs);
+    }
 
     this_type&
     operator--()
     {
-        --p;
-        return *this;
+        return (*this) -= 1;
     }
 
     this_type
@@ -312,48 +417,55 @@ public:
     reference
     operator*() const
     {
-        return *p;
+        return *m_ptr;
     }
 
     reference
     operator->()
     {
-        return *p;
+        return &(operator*());
     }
 
     this_type&
     operator++()
     {
-
-        return ++p;
+        return (*this) += 1;
     }
 
     this_type
     operator++(int)
     {
-        this_type ret{ p };
+        this_type ret{ *this };
         ++(*this);
         return ret;
     }
 
-    friend bool
-    operator==(this_type l, this_type r)
-    {
-        return l.p == r.p;
-    };
+    friend bool operator==(this_type, this_type) = default;
 
     friend bool
     operator!=(this_type l, this_type r)
     {
         return not(l == r);
-    };
+    }
 
 private:
-    pointer p{ nullptr };
+    template <bool pIsConst>
+    static iterator<pIsConst>::pointer
+    linearize_pointer(iterator<pIsConst> const it)
+    {
+        return it.m_ptr == 0 ? it.m_buf->m_buf + it.m_buf->size()
+                             : (it.m_ptr < it.m_buf->m_first
+                                    ? it.m_ptr + (it.m_buf->m_end - it.m_buf->m_first)
+                                    : it.m_buf->m_buf + (it.m_ptr - it.m_buf->m_first));
+    }
 };
+
 static_assert(std::random_access_iterator<ringbuf<int>::iterator<false>>);
 static_assert(std::random_access_iterator<ringbuf<int>::iterator<true>>);
 static_assert(std::sentinel_for<ringbuf<int>::iterator<false>, ringbuf<int>::iterator<false>>);
 static_assert(std::sentinel_for<ringbuf<int>::iterator<true>, ringbuf<int>::iterator<true>>);
+static_assert(std::input_or_output_iterator<ringbuf<int>::iterator<false>>);
+static_assert(std::input_or_output_iterator<ringbuf<int>::iterator<true>>);
+static_assert(std::ranges::range<tt::ringbuf<int>&>);
 
 } // namespace tt

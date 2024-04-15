@@ -21,7 +21,6 @@ executable("tests") {
 
     configs = [
         ":tt",
-        "//build:compiler_defaults",
     ]
 }
 
