@@ -191,18 +191,26 @@ public:
     std::optional<value_type>
     pop_back()
     {
-        if (size() < 1)
+        if (empty())
             return std::nullopt;
 
-        auto ret{ *m_last };
+        value_type ret{ *(--end()) };
+        allocator_traits::destroy(get_allocator(), m_last);
         decrement(m_last);
+        --m_size;
         return ret;
     }
 
     std::optional<value_type>
     pop_front()
     {
-        detail::unimplemented();
+        if (empty())
+            return std::nullopt;
+
+        value_type ret{ *begin() };
+        increment(m_first);
+        --m_size;
+        return ret;
     }
 
     void

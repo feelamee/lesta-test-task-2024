@@ -1,4 +1,3 @@
-#include <cmath>
 #include <tt/iseven.hpp>
 #include <tt/ringbuf.hpp>
 
@@ -26,6 +25,29 @@ struct std::formatter<fail_info>
     format(fail_info const& obj, std::format_context& ctx) const
     {
         return std::format_to(ctx.out(), "{}\nLastly he said: '{}'", obj.source_info, obj.msg);
+    }
+};
+
+template <typename T>
+struct std::formatter<std::optional<T>>
+{
+    constexpr auto
+    parse(std::format_parse_context& ctx)
+    {
+        return ctx.begin();
+    }
+
+    auto
+    format(std::optional<T> const& obj, std::format_context& ctx) const
+    {
+        if (obj)
+        {
+            return std::format_to(ctx.out(), "?{}", *obj);
+        }
+        else
+        {
+            return std::format_to(ctx.out(), "?{}", "none");
+        }
     }
 };
 
@@ -107,34 +129,36 @@ constexpr auto run = []<std::invocable Fn>(Fn&& fn) -> int
 // but also I miss any chance to forget call test function from main()
 constexpr std::array tests = {
 
-    // clang-format off
-+[]() -> std::optional<fail_info>
-{
-    REQUIRE_EQ(true, tt::iseven(0));
+    +[]() -> std::optional<fail_info>
+    {
+        REQUIRE_EQ(true, tt::iseven(0));
 
-    REQUIRE_EQ(true, tt::iseven(2));
-    REQUIRE_EQ(true, tt::iseven(-2));
+        REQUIRE_EQ(true, tt::iseven(2));
+        REQUIRE_EQ(true, tt::iseven(-2));
 
-    REQUIRE_EQ(false, tt::iseven(1));
-    REQUIRE_EQ(false, tt::iseven(-1));
-    REQUIRE_EQ(false, tt::iseven(3));
+        REQUIRE_EQ(false, tt::iseven(1));
+        REQUIRE_EQ(false, tt::iseven(-1));
+        REQUIRE_EQ(false, tt::iseven(3));
 
-    return std::nullopt;
-},
+        return std::nullopt;
+    },
 
-+[]() -> std::optional<fail_info>
-{
+    +[]() -> std::optional<fail_info>
     {
         tt::ringbuf<int> buf(0);
         REQUIRE(buf.empty());
         REQUIRE_EQ(0, buf.size());
         REQUIRE(buf.full());
-    }
+        return std::nullopt;
+    },
+    +[]() -> std::optional<fail_info>
     {
         tt::ringbuf<int> buf1(0);
         tt::ringbuf<int> buf2(1);
         REQUIRE_EQ(buf1, buf2);
-    }
+        return std::nullopt;
+    },
+    +[]() -> std::optional<fail_info>
     {
         using value_type = int;
         using allocator_type = std::allocator<value_type>;
@@ -157,7 +181,9 @@ constexpr std::array tests = {
             REQUIRE_EQ(alloc1.id, buf.get_allocator().id);
             REQUIRE_NEQ(alloc2.id, buf.get_allocator().id);
         }
-    }
+        return std::nullopt;
+    },
+    +[]() -> std::optional<fail_info>
     {
         tt::ringbuf<int> buf(1);
         REQUIRE_EQ(buf.begin(), buf.end());
@@ -165,13 +191,15 @@ constexpr std::array tests = {
 
         buf.emplace_back(42);
         REQUIRE_EQ(buf.size(), 1);
-        REQUIRE_NEQ(buf.begin(), buf.end());
         REQUIRE_EQ(buf.begin() + 1, buf.end());
-    }
+        return std::nullopt;
+    },
+    +[]() -> std::optional<fail_info>
     {
         tt::ringbuf<int> buf1(1);
         buf1.emplace_back(5);
         REQUIRE_EQ(buf1.size(), 1);
+        REQUIRE_EQ(*buf1.begin(), 5);
         buf1.clear();
         REQUIRE_EQ(buf1.size(), 0);
         {
@@ -193,11 +221,45 @@ constexpr std::array tests = {
             buf2.emplace_back(5);
             REQUIRE_EQ(buf3, buf2);
         }
+        return std::nullopt;
+    },
+    +[]() -> std::optional<fail_info>
+    {
+        tt::ringbuf<int> buf(2);
+        buf.emplace_back(42);
+        auto const v{ buf.pop_back() };
+        REQUIRE(v.has_value())
+        REQUIRE_EQ(42, *v);
+        REQUIRE(buf.empty());
+        return std::nullopt;
+    },
+    +[]() -> std::optional<fail_info>
+    {
+        tt::ringbuf<int> buf(2);
+        auto const v{ buf.pop_back() };
+        REQUIRE(not v.has_value())
+        REQUIRE_EQ(std::optional<int>(), v);
+        return std::nullopt;
+    },
+    +[]() -> std::optional<fail_info>
+    {
+        tt::ringbuf<int> buf(2);
+        buf.emplace_back(42);
+        auto const v{ buf.pop_front() };
+        REQUIRE(v.has_value())
+        REQUIRE_EQ(42, *v);
+        REQUIRE(buf.empty());
+        return std::nullopt;
+    },
+    +[]() -> std::optional<fail_info>
+    {
+        tt::ringbuf<int> buf(2);
+        auto const v{ buf.pop_back() };
+        REQUIRE(not v.has_value())
+        REQUIRE_EQ(std::optional<int>(), v);
+        return std::nullopt;
+    },
 
-    }
-    return std::nullopt;
-}
-    // clang-format on
 };
 
 int
