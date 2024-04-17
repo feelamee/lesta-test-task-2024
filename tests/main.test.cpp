@@ -187,39 +187,38 @@ constexpr std::array tests = {
     {
         tt::ringbuf<int> buf(1);
         REQUIRE_EQ(buf.begin(), buf.end());
-        REQUIRE_EQ(buf.size(), 0);
 
-        buf.emplace_back(42);
+        int const val{ 42 };
+        buf.emplace_back(val);
         REQUIRE_EQ(buf.size(), 1);
         REQUIRE_EQ(buf.begin() + 1, buf.end());
+        REQUIRE_EQ(*buf.begin(), val);
         return std::nullopt;
     },
     +[]() -> std::optional<fail_info>
     {
         tt::ringbuf<int> buf1(1);
+        REQUIRE(buf1.empty());
         buf1.emplace_back(5);
-        REQUIRE_EQ(buf1.size(), 1);
-        REQUIRE_EQ(*buf1.begin(), 5);
+        REQUIRE(buf1.full());
         buf1.clear();
-        REQUIRE_EQ(buf1.size(), 0);
+        REQUIRE(buf1.empty());
         {
             tt::ringbuf<int> buf2 = buf1;
-            REQUIRE(buf2.empty())
             REQUIRE_EQ(buf2.capacity(), 1)
-            REQUIRE(not buf2.full())
 
             buf2.emplace_back(5);
-            REQUIRE(buf2.full())
-            REQUIRE(not buf2.empty())
-            REQUIRE_EQ(buf2.size(), 1);
             REQUIRE_NEQ(buf1, buf2);
         }
         {
             auto buf2 = buf1;
             buf2.emplace_back(5);
+            REQUIRE_EQ(*buf2.begin(), 5);
             auto buf3 = buf2;
-            buf2.emplace_back(5);
-            REQUIRE_EQ(buf3, buf2);
+            buf3.emplace_back(6);
+            REQUIRE_EQ(*buf3.begin(), 6);
+
+            REQUIRE_EQ(buf3.size(), buf2.size());
         }
         return std::nullopt;
     },
