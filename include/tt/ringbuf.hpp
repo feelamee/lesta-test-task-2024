@@ -195,8 +195,8 @@ public:
             return std::nullopt;
 
         value_type ret{ *(--end()) };
-        allocator_traits::destroy(get_allocator(), m_last);
         decrement(m_last);
+        allocator_traits::destroy(get_allocator(), m_last);
         --m_size;
         return ret;
     }
@@ -208,6 +208,7 @@ public:
             return std::nullopt;
 
         value_type ret{ *begin() };
+        allocator_traits::destroy(get_allocator(), m_first);
         increment(m_first);
         --m_size;
         return ret;
