@@ -21,6 +21,7 @@ executable("tests") {
 
     configs = [
         ":tt",
+        "//build:debug"
     ]
 }
 

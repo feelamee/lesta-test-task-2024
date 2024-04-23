@@ -138,11 +138,12 @@ public:
         using std::swap;
 
         swap(lhs.m_buf, rhs.m_buf);
-        swap(lhs.bufsize, rhs.bufsize);
+        swap(lhs.m_end, rhs.m_end);
         swap(lhs.m_allocator, rhs.m_allocator);
 
         swap(lhs.m_last, rhs.m_last);
         swap(lhs.m_first, rhs.m_first);
+        swap(lhs.m_size, rhs.m_size);
     }
 
     void
