@@ -296,6 +296,13 @@ constexpr std::array tests = {
         return std::nullopt;
     },
 
+    // sort
+    +[]() -> std::optional<fail_info>
+    {
+        ;
+        return std::nullopt;
+    },
+
 };
 
 int
