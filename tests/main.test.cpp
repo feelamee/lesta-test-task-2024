@@ -1,4 +1,5 @@
 #include <tt/iseven.hpp>
+#include <tt/lock_free_ringbuf.hpp>
 #include <tt/ringbuf.hpp>
 
 #include <array>
@@ -43,8 +44,7 @@ struct std::formatter<std::optional<T>>
         if (obj)
         {
             return std::format_to(ctx.out(), "?{}", *obj);
-        }
-        else
+        } else
         {
             return std::format_to(ctx.out(), "?{}", "none");
         }
@@ -84,8 +84,8 @@ struct std::formatter<Iter<IsConst>>
     auto
     format(Iter<IsConst> const obj, std::format_context& ctx) const
     {
-        return std::format_to(
-            ctx.out(), "{{ .m_buf = {}, .m_ptr = {} }}", (void*)obj.m_buf, (void*)obj.m_ptr);
+        return std::format_to(ctx.out(), "{{ .m_buf = {}, .m_ptr = {} }}", (void*)obj.m_buf,
+                              (void*)obj.m_ptr);
     }
 };
 
@@ -94,7 +94,7 @@ struct std::formatter<Iter<IsConst>>
         auto const expr_result = (expr);                                                           \
         if (not expr_result)                                                                       \
             return fail_info{ std::source_location::current(),                                     \
-                              std::format("'{}' is... lie", expr) };                               \
+                              std::format("{} is... lie", expr) };                                 \
     }
 
 #define REQUIRE_EQ(expr1, expr2)                                                                   \
@@ -103,7 +103,7 @@ struct std::formatter<Iter<IsConst>>
         auto const expr2_result = (expr2);                                                         \
         if (not(expr1_result == expr2_result))                                                     \
             return fail_info{ std::source_location::current(),                                     \
-                              std::format("'{} == {}' is... lie", expr1, expr2) };                 \
+                              std::format("{} == {} is... lie", expr1, expr2) };                   \
     }
 
 #define REQUIRE_NEQ(expr1, expr2)                                                                  \
@@ -112,7 +112,7 @@ struct std::formatter<Iter<IsConst>>
         auto const expr2_result = (expr2);                                                         \
         if (not(expr1_result != expr2_result))                                                     \
             return fail_info{ std::source_location::current(),                                     \
-                              std::format("'{} != {}' is... lie", expr1, expr2) };                 \
+                              std::format("{} != {} is... lie", expr1, expr2) };                   \
     }
 
 constexpr auto run = []<std::invocable Fn>(Fn&& fn) -> int
@@ -125,11 +125,14 @@ constexpr auto run = []<std::invocable Fn>(Fn&& fn) -> int
     return EXIT_SUCCESS;
 };
 
+using test_return_type = std::optional<fail_info>;
 // here I missing pretty name of functions in log when test failed,
 // but also I miss any chance to forget call test function from main()
+// althrough I'm still have filename:line:column
 constexpr std::array tests = {
 
-    +[]() -> std::optional<fail_info>
+    // iseven
+    +[]() -> test_return_type
     {
         REQUIRE_EQ(true, tt::iseven(0));
 
@@ -143,22 +146,23 @@ constexpr std::array tests = {
         return std::nullopt;
     },
 
-    +[]() -> std::optional<fail_info>
+    // tt::ringbuf
+    +[]() -> test_return_type
     {
-        tt::ringbuf<int> buf(0);
+        tt::ringbuf<int> buf{ 0 };
         REQUIRE(buf.empty());
         REQUIRE_EQ(0, buf.size());
         REQUIRE(buf.full());
         return std::nullopt;
     },
-    +[]() -> std::optional<fail_info>
+    +[]() -> test_return_type
     {
-        tt::ringbuf<int> buf1(0);
-        tt::ringbuf<int> buf2(1);
+        tt::ringbuf<int> buf1{ 0 };
+        tt::ringbuf<int> buf2{ 1 };
         REQUIRE_EQ(buf1, buf2);
         return std::nullopt;
     },
-    +[]() -> std::optional<fail_info>
+    +[]() -> test_return_type
     {
         using value_type = int;
         using allocator_type = std::allocator<value_type>;
@@ -183,9 +187,9 @@ constexpr std::array tests = {
         }
         return std::nullopt;
     },
-    +[]() -> std::optional<fail_info>
+    +[]() -> test_return_type
     {
-        tt::ringbuf<int> buf(1);
+        tt::ringbuf<int> buf{ 1 };
         REQUIRE_EQ(buf.begin(), buf.end());
 
         int const val{ 42 };
@@ -195,9 +199,9 @@ constexpr std::array tests = {
         REQUIRE_EQ(*buf.begin(), val);
         return std::nullopt;
     },
-    +[]() -> std::optional<fail_info>
+    +[]() -> test_return_type
     {
-        tt::ringbuf<int> buf1(1);
+        tt::ringbuf<int> buf1{ 1 };
         REQUIRE(buf1.empty());
         buf1.emplace_back(5);
         REQUIRE(buf1.full());
@@ -231,9 +235,9 @@ constexpr std::array tests = {
         }
         return std::nullopt;
     },
-    +[]() -> std::optional<fail_info>
+    +[]() -> test_return_type
     {
-        tt::ringbuf<int> buf(2);
+        tt::ringbuf<int> buf{ 2 };
         buf.emplace_back(42);
         auto const v{ buf.pop_back() };
         REQUIRE(v.has_value())
@@ -241,17 +245,17 @@ constexpr std::array tests = {
         REQUIRE(buf.empty());
         return std::nullopt;
     },
-    +[]() -> std::optional<fail_info>
+    +[]() -> test_return_type
     {
-        tt::ringbuf<int> buf(2);
+        tt::ringbuf<int> buf{ 2 };
         auto const v{ buf.pop_back() };
         REQUIRE(not v.has_value())
         REQUIRE_EQ(std::optional<int>(), v);
         return std::nullopt;
     },
-    +[]() -> std::optional<fail_info>
+    +[]() -> test_return_type
     {
-        tt::ringbuf<int> buf(2);
+        tt::ringbuf<int> buf{ 2 };
         buf.emplace_back(42);
         auto const v{ buf.pop_front() };
         REQUIRE(v.has_value())
@@ -259,9 +263,9 @@ constexpr std::array tests = {
         REQUIRE(buf.empty());
         return std::nullopt;
     },
-    +[]() -> std::optional<fail_info>
+    +[]() -> test_return_type
     {
-        tt::ringbuf<int> buf(2);
+        tt::ringbuf<int> buf{ 2 };
         auto const v{ buf.pop_back() };
         REQUIRE(not v.has_value())
         REQUIRE_EQ(std::optional<int>(), v);
@@ -277,12 +281,11 @@ constexpr std::array tests = {
         std::array expected{ 2, 3, 4, 5, 6 };
         auto i{ buf1.begin() };
         auto j{ expected.begin() };
-        for (; i != buf1.end() && j != expected.end(); ++i, ++j)
-            REQUIRE_EQ(*i, *j);
+        for (; i != buf1.end() && j != expected.end(); ++i, ++j) REQUIRE_EQ(*i, *j);
 
         return std::nullopt;
     },
-    +[]() -> std::optional<fail_info>
+    +[]() -> test_return_type
     {
         std::size_t const capacity1{ 5 };
         tt::ringbuf<int> buf1{ capacity1 };
@@ -295,6 +298,37 @@ constexpr std::array tests = {
         REQUIRE_EQ(capacity2, buf1.capacity());
         return std::nullopt;
     },
+
+    // tt::ringbuf_v2
+    +[]() -> test_return_type
+    {
+        std::size_t capacity{ 2 };
+        REQUIRE(tt::detail::is_power_of_2(capacity));
+
+        tt::lock_free_ringbuf<int> buf{ capacity };
+        REQUIRE_EQ(capacity, buf.capacity())
+        REQUIRE(buf.empty());
+        REQUIRE(!buf.full());
+
+        tt::lock_free_ringbuf<int> buf2{ std::move(buf) };
+        REQUIRE_EQ(capacity, buf2.capacity())
+        REQUIRE(buf2.empty());
+        REQUIRE(!buf2.full());
+
+        return std::nullopt;
+    },
+    +[]() -> test_return_type
+    {
+        std::size_t const capacity1{ 1 };
+        REQUIRE(tt::detail::is_power_of_2(capacity1));
+
+        tt::lock_free_ringbuf<int> buf{ capacity1 };
+        buf.emplace_back(42);
+        REQUIRE(!buf.empty());
+        REQUIRE(buf.full());
+
+        return std::nullopt;
+    }
 
 };
 
