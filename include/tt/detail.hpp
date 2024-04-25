@@ -1,9 +1,9 @@
 #pragma once
 
+#include <concepts>
 #include <cstdlib>
 #include <format>
 #include <iostream>
-#include <limits>
 #include <source_location>
 #include <type_traits>
 
@@ -49,6 +49,13 @@ unimplemented(std::source_location src = std::source_location::current())
 {
     std::cerr << std::format("[unimplemented] {}\n", src);
     std::exit(EXIT_FAILURE);
+}
+
+template <std::unsigned_integral T>
+bool
+is_power_of_2(T const v)
+{
+    return v > 0 && !(v & (v - 1));
 }
 
 } // namespace tt::detail
