@@ -23,7 +23,7 @@ BraceWrapping:
   AfterEnum:       true
   AfterFunction:   true
   AfterNamespace:  true
-  AfterObjCDeclaration: false
+  BeforeLambdaBody: true
   AfterStruct:     true
   AfterUnion:      true
   BeforeCatch:     false
