@@ -142,10 +142,10 @@ public:
         return capacity() - size();
     }
 
-    void
+    bool
     push_back(param_value_type v)
     {
-        emplace_back(value_type{ v });
+        return emplace_back(value_type{ v });
     }
 
     bool
@@ -170,8 +170,8 @@ public:
             if (diff < 0) return false;
             if (diff == 0 && m_last.compare_exchange_weak(pos, pos + 1, std::memory_order::seq_cst))
                 break;
-
-            pos = m_last.load(std::memory_order::seq_cst);
+            else
+                pos = m_last.load(std::memory_order::seq_cst);
         }
 
         ptr->value = value_type{ std::forward<decltype(args)>(args)... };
@@ -197,8 +197,8 @@ public:
             if (diff == 0 &&
                 m_first.compare_exchange_weak(pos, pos + 1, std::memory_order::seq_cst))
                 break;
-
-            pos = m_first.load(std::memory_order::seq_cst);
+            else
+                pos = m_first.load(std::memory_order::seq_cst);
         }
 
         value_type ret{ std::move(ptr->value) };
