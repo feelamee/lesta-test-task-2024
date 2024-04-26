@@ -1,7 +1,9 @@
 #pragma once
 
+#include <optional>
 #include <tt/detail.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -28,7 +30,7 @@ private:
     struct value_type_impl
     {
         value_type value;
-        std::size_t counter{ 0 };
+        std::atomic<std::size_t> seq{ 0 };
     };
     using allocator_type_impl = allocator_traits::template rebind_alloc<value_type_impl>;
     using allocator_traits_impl = std::allocator_traits<allocator_type_impl>;
@@ -40,7 +42,9 @@ private:
     init_with_capacity(size_type sz)
     {
         m_buf_begin = allocator_traits_impl::allocate(get_allocator_impl(), sz);
-        m_buf_end = m_buf_begin + sz;
+        m_capacity = sz;
+        std::for_each_n(m_buf_begin, capacity(),
+                        [cnt = 0](auto& v) mutable { v.seq.exchange(cnt++); });
 
         m_last.store(0, std::memory_order::seq_cst);
         m_first.store(0, std::memory_order::seq_cst);
@@ -111,7 +115,7 @@ public:
     size_type
     capacity() const noexcept
     {
-        return m_buf_end - m_buf_begin;
+        return m_capacity;
     }
 
     size_type
@@ -144,17 +148,63 @@ public:
         emplace_back(value_type{ v });
     }
 
-    void
+    bool
     emplace_back(auto&&... args)
         requires std::is_constructible_v<value_type, decltype(args)...>
     {
-        detail::unimplemented();
+        pointer_impl ptr{ nullptr };
+        size_type pos{ m_last.load(std::memory_order::seq_cst) };
+
+        // Here I use the idea of Dmitry Vyukov.
+        // https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue for details
+        // briefly, we enumerate each element by it position on ringbuf init and increase this
+        // number, when someone take exclusive ownership on it.
+        // So, we (read - this thread) can know, that is not we and just return false
+        for (;;)
+        {
+            ptr = m_buf_begin + (pos & capacity());
+            std::size_t const seq{ ptr->seq.load(std::memory_order::seq_cst) };
+            std::int64_t const diff{ static_cast<std::int64_t>(seq) -
+                                     static_cast<std::int64_t>(pos) };
+
+            if (diff < 0) return false;
+            if (diff == 0 && m_last.compare_exchange_weak(pos, pos + 1, std::memory_order::seq_cst))
+                break;
+
+            pos = m_last.load(std::memory_order::seq_cst);
+        }
+
+        ptr->value = value_type{ std::forward<decltype(args)>(args)... };
+        ptr->seq.store(pos + size_type(1), std::memory_order::seq_cst);
+
+        return true;
     }
 
     std::optional<value_type>
     pop_front()
     {
-        detail::unimplemented();
+        pointer_impl ptr{ nullptr };
+        std::size_t pos{ m_first.load(std::memory_order::seq_cst) };
+
+        for (;;)
+        {
+            ptr = m_buf_begin + (pos & mask());
+            std::size_t const seq = ptr->seq.load(std::memory_order::seq_cst);
+            std::int64_t const diff{ static_cast<std::int64_t>(seq) -
+                                     static_cast<std::int64_t>(pos + 1) };
+
+            if (diff < 0) return std::nullopt;
+            if (diff == 0 &&
+                m_first.compare_exchange_weak(pos, pos + 1, std::memory_order::seq_cst))
+                break;
+
+            pos = m_first.load(std::memory_order::seq_cst);
+        }
+
+        value_type ret{ std::move(ptr->value) };
+        ptr->seq.store(pos + mask() + size_type(1), std::memory_order::seq_cst);
+
+        return ret;
     }
 
     // TODO: specialize for `std:ranges::sized_range` using `drop(size(view) -
@@ -174,10 +224,10 @@ public:
     }
 
 private:
-    void
-    increment(std::atomic<pointer>&) const
+    size_type
+    mask() const
     {
-        detail::unimplemented();
+        return capacity() - 1;
     }
 
     allocator_type_impl&
@@ -193,7 +243,8 @@ private:
     }
 
     pointer_impl m_buf_begin{ nullptr };
-    pointer_impl m_buf_end{ nullptr };
+    // one is the smallest power of 2. Of course, except for negative ones))
+    size_type m_capacity{ 1 };
 
     std::atomic<size_type> m_last{ 0 };
     std::atomic<size_type> m_first{ 0 };

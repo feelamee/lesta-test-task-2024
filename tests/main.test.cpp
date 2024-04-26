@@ -325,7 +325,17 @@ constexpr std::array tests = {
         tt::lock_free_ringbuf<int> buf{ capacity1 };
         buf.emplace_back(42);
         REQUIRE(!buf.empty());
+        REQUIRE_EQ(1, buf.size());
         REQUIRE(buf.full());
+
+        auto v{ buf.pop_front() };
+        REQUIRE(v.has_value());
+        REQUIRE_EQ(42, *v);
+        REQUIRE(buf.empty());
+        REQUIRE_EQ(0, buf.size());
+
+        v = buf.pop_front();
+        REQUIRE(!v.has_value());
 
         return std::nullopt;
     }
