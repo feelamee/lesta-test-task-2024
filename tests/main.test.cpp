@@ -1,349 +1,332 @@
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include "doctest.h"
+
+#include <tt/detail.hpp>
 #include <tt/iseven.hpp>
 #include <tt/lock_free_ringbuf.hpp>
 #include <tt/ringbuf.hpp>
 
-#include <array>
-#include <format>
-#include <functional>
-#include <optional>
+#include <thread>
 
-struct fail_info
+TEST_CASE("iseven")
 {
-    std::source_location source_info;
-    std::string msg;
-};
+    REQUIRE_EQ(true, tt::iseven(0));
 
-template <>
-struct std::formatter<fail_info>
+    REQUIRE_EQ(true, tt::iseven(2));
+    REQUIRE_EQ(true, tt::iseven(-2));
+
+    REQUIRE_EQ(false, tt::iseven(1));
+    REQUIRE_EQ(false, tt::iseven(-1));
+    REQUIRE_EQ(false, tt::iseven(3));
+}
+
+TEST_CASE("ringbuf::empty/size/full")
 {
-    constexpr auto
-    parse(std::format_parse_context& ctx)
-    {
-        return ctx.begin();
-    }
+    tt::ringbuf<int> buf{ 0 };
+    REQUIRE(buf.empty());
+    REQUIRE_EQ(0, buf.size());
+    REQUIRE(buf.full());
+}
 
-    auto
-    format(fail_info const& obj, std::format_context& ctx) const
-    {
-        return std::format_to(ctx.out(), "{}\nLastly he said: '{}'", obj.source_info, obj.msg);
-    }
-};
-
-template <typename T>
-struct std::formatter<std::optional<T>>
+TEST_CASE("ringbuf::operator==")
 {
-    constexpr auto
-    parse(std::format_parse_context& ctx)
-    {
-        return ctx.begin();
-    }
+    tt::ringbuf<int> buf1{ 0 };
+    tt::ringbuf<int> buf2{ 1 };
+    REQUIRE_EQ(buf1, buf2);
+}
 
-    auto
-    format(std::optional<T> const& obj, std::format_context& ctx) const
-    {
-        if (obj)
-        {
-            return std::format_to(ctx.out(), "?{}", *obj);
-        } else
-        {
-            return std::format_to(ctx.out(), "?{}", "none");
-        }
-    }
-};
-
-template <std::semiregular T, typename Alloc>
-struct std::formatter<tt::ringbuf<T, Alloc>>
+TEST_CASE("ringbuf::max_size")
 {
-    constexpr auto
-    parse(std::format_parse_context& ctx)
+    using value_type = int;
+    using allocator_type = std::allocator<value_type>;
+    using allocator_traits = std::allocator_traits<allocator_type>;
+
     {
-        return ctx.begin();
+        allocator_type alloc;
+        tt::ringbuf<value_type, allocator_type> buf(0, alloc);
+        REQUIRE_EQ(buf.max_size(), allocator_traits::max_size(alloc));
     }
 
-    auto
-    format(tt::ringbuf<T, Alloc> const& obj, std::format_context& ctx) const
     {
-        std::format_to(ctx.out(), "[ ");
-        for (auto const& el : obj)
+        struct custom_allocator : public std::allocator<value_type>
         {
-            std::format_to(ctx.out(), "{} ", el);
-        }
-        return std::format_to(ctx.out(), "]");
+            int id;
+        };
+        custom_allocator alloc1{ .id = 42 };
+        custom_allocator alloc2{ .id = 69 };
+        tt::ringbuf<value_type, custom_allocator> buf(42, alloc1);
+        REQUIRE_EQ(alloc1.id, buf.get_allocator().id);
+        REQUIRE_NE(alloc2.id, buf.get_allocator().id);
     }
-};
+}
 
-template <template <bool> typename Iter, bool IsConst>
-struct std::formatter<Iter<IsConst>>
+TEST_CASE("ringubf::emplace_back")
 {
-    constexpr auto
-    parse(std::format_parse_context& ctx)
-    {
-        return ctx.begin();
-    }
+    tt::ringbuf<int> buf{ 1 };
+    REQUIRE_EQ(buf.begin(), buf.end());
 
-    auto
-    format(Iter<IsConst> const obj, std::format_context& ctx) const
-    {
-        return std::format_to(ctx.out(), "{{ .m_buf = {}, .m_ptr = {} }}", (void*)obj.m_buf,
-                              (void*)obj.m_ptr);
-    }
-};
+    int const val{ 42 };
+    buf.emplace_back(val);
+    REQUIRE_EQ(buf.size(), 1);
+    REQUIRE_EQ(buf.begin() + 1, buf.end());
+    REQUIRE_EQ(*buf.begin(), val);
+}
 
-#define REQUIRE(expr)                                                                              \
-    {                                                                                              \
-        auto const expr_result = (expr);                                                           \
-        if (not expr_result)                                                                       \
-            return fail_info{ std::source_location::current(),                                     \
-                              std::format("{} is... lie", expr) };                                 \
-    }
-
-#define REQUIRE_EQ(expr1, expr2)                                                                   \
-    {                                                                                              \
-        auto const expr1_result = (expr1);                                                         \
-        auto const expr2_result = (expr2);                                                         \
-        if (not(expr1_result == expr2_result))                                                     \
-            return fail_info{ std::source_location::current(),                                     \
-                              std::format("{} == {} is... lie", expr1, expr2) };                   \
-    }
-
-#define REQUIRE_NEQ(expr1, expr2)                                                                  \
-    {                                                                                              \
-        auto const expr1_result = (expr1);                                                         \
-        auto const expr2_result = (expr2);                                                         \
-        if (not(expr1_result != expr2_result))                                                     \
-            return fail_info{ std::source_location::current(),                                     \
-                              std::format("{} != {} is... lie", expr1, expr2) };                   \
-    }
-
-constexpr auto run = []<std::invocable Fn>(Fn&& fn) -> int
+TEST_CASE("ringbuf::emplace_back with overwrite")
 {
-    if (auto mbinfo = std::invoke(std::forward<Fn>(fn)); mbinfo)
+    tt::ringbuf<int> buf1{ 1 };
+    REQUIRE(buf1.empty());
+    buf1.emplace_back(5);
+    REQUIRE(buf1.full());
+    buf1.clear();
+    REQUIRE(buf1.empty());
     {
-        std::clog << std::format("[TEST FAILED] {}\n", mbinfo.value());
-        return EXIT_FAILURE;
+        tt::ringbuf<int> buf2{ buf1 };
+        REQUIRE_EQ(buf2.capacity(), 1);
+
+        buf2.emplace_back(5);
+        REQUIRE_NE(buf1, buf2);
     }
-    return EXIT_SUCCESS;
-};
-
-using test_return_type = std::optional<fail_info>;
-// here I missing pretty name of functions in log when test failed,
-// but also I miss any chance to forget call test function from main()
-// althrough I'm still have filename:line:column
-constexpr std::array tests = {
-
-    // iseven
-    +[]() -> test_return_type
     {
-        REQUIRE_EQ(true, tt::iseven(0));
+        auto buf2{ buf1 };
+        buf2.emplace_back(5);
+        REQUIRE_EQ(*buf2.begin(), 5);
+        auto buf3{ buf2 };
+        buf3.emplace_back(6);
+        REQUIRE_EQ(*buf3.begin(), 6);
 
-        REQUIRE_EQ(true, tt::iseven(2));
-        REQUIRE_EQ(true, tt::iseven(-2));
-
-        REQUIRE_EQ(false, tt::iseven(1));
-        REQUIRE_EQ(false, tt::iseven(-1));
-        REQUIRE_EQ(false, tt::iseven(3));
-
-        return std::nullopt;
-    },
-
-    // tt::ringbuf
-    +[]() -> test_return_type
+        REQUIRE_EQ(buf3.size(), buf2.size());
+    }
     {
-        tt::ringbuf<int> buf{ 0 };
-        REQUIRE(buf.empty());
-        REQUIRE_EQ(0, buf.size());
-        REQUIRE(buf.full());
-        return std::nullopt;
-    },
-    +[]() -> test_return_type
+        tt::ringbuf buf2{ buf1 };
+        buf2.emplace_back(5);
+
+        tt::ringbuf<int> buf3{ buf2.capacity() };
+        REQUIRE_NE(buf2, buf3);
+        buf3 = buf2;
+        REQUIRE_EQ(buf2, buf3);
+    }
+}
+
+TEST_CASE("ringbuf::emplace_back/pop_back")
+{
+    tt::ringbuf<int> buf{ 2 };
+    buf.emplace_back(42);
+    auto const v{ buf.pop_back() };
+    REQUIRE(v.has_value());
+    REQUIRE_EQ(42, *v);
+    REQUIRE(buf.empty());
+}
+
+TEST_CASE("ringbuf::pop_back on empty")
+{
+    tt::ringbuf<int> buf{ 2 };
+    auto const v{ buf.pop_back() };
+    REQUIRE(!v.has_value());
+    REQUIRE_EQ(std::optional<int>(), v);
+}
+
+TEST_CASE("ringbuf::emplace_back/pop_front")
+{
+    tt::ringbuf<int> buf{ 2 };
+    buf.emplace_back(42);
+    auto const v{ buf.pop_front() };
+    REQUIRE(v.has_value());
+    REQUIRE_EQ(42, *v);
+    REQUIRE(buf.empty());
+}
+
+TEST_CASE("ringbuf::append_range")
+{
+    std::size_t const capacity1{ 5 };
+    tt::ringbuf<int> buf1{ capacity1 };
+
+    using std::views::all;
+    buf1.append_range(std::array{ 1, 2, 3, 4, 5, 6 } | all);
+    std::array expected{ 2, 3, 4, 5, 6 };
+    auto i{ buf1.begin() };
+    auto j{ expected.begin() };
+    for (; i != buf1.end() && j != expected.end(); ++i, ++j) REQUIRE_EQ(*i, *j);
+}
+
+TEST_CASE("ringbuf::swap")
+{
+    std::size_t const capacity1{ 5 };
+    tt::ringbuf<int> buf1{ capacity1 };
+
+    std::size_t const capacity2{ 3 };
+    tt::ringbuf<int> buf2{ capacity2 };
+
+    swap(buf1, buf2);
+    REQUIRE_EQ(capacity1, buf2.capacity());
+    REQUIRE_EQ(capacity2, buf1.capacity());
+}
+
+TEST_CASE("lock_free_ringbuf empty/move ctor")
+{
+    std::size_t capacity{ 2 };
+    REQUIRE(tt::detail::is_power_of_2(capacity));
+
+    tt::lock_free_ringbuf<int> buf{ capacity };
+    REQUIRE_EQ(capacity, buf.capacity());
+    REQUIRE(buf.empty());
+    REQUIRE(!buf.full());
+
+    tt::lock_free_ringbuf<int> buf2{ std::move(buf) };
+    REQUIRE_EQ(capacity, buf2.capacity());
+    REQUIRE(buf2.empty());
+    REQUIRE(!buf2.full());
+}
+
+TEST_CASE("lock_free_ringbuf::push_back/pop_front")
+{
+    std::size_t const capacity1{ 1 };
+    REQUIRE(tt::detail::is_power_of_2(capacity1));
+
+    tt::lock_free_ringbuf<int> buf{ capacity1 };
+    buf.push_back(42);
+    REQUIRE(!buf.empty());
+    REQUIRE_EQ(1, buf.size());
+    REQUIRE(buf.full());
+
+    auto v{ buf.pop_front() };
+    REQUIRE(v.has_value());
+    REQUIRE_EQ(42, *v);
+    REQUIRE(buf.empty());
+    REQUIRE_EQ(0, buf.size());
+
+    v = buf.pop_front();
+    REQUIRE(!v.has_value());
+}
+TEST_CASE("lock_free_ringbuf::emplace_back/pop_front")
+{
+    std::size_t const capacity1{ 1 };
+    REQUIRE(tt::detail::is_power_of_2(capacity1));
+
+    tt::lock_free_ringbuf<int> buf{ capacity1 };
+    buf.emplace_back(42);
+    REQUIRE(!buf.empty());
+    REQUIRE_EQ(1, buf.size());
+    REQUIRE(buf.full());
+
+    auto v{ buf.pop_front() };
+    REQUIRE(v.has_value());
+    REQUIRE_EQ(42, *v);
+    REQUIRE(buf.empty());
+    REQUIRE_EQ(0, buf.size());
+
+    v = buf.pop_front();
+    REQUIRE(!v.has_value());
+}
+
+TEST_CASE("lock_free_ringbuf::emplace_back/pop_front several times")
+{
+    std::size_t const capacity1{ 4 };
+    REQUIRE(tt::detail::is_power_of_2(capacity1));
+
+    tt::lock_free_ringbuf<int> buf{ capacity1 };
+    buf.emplace_back(42);
+    buf.emplace_back(43);
+    buf.emplace_back(44);
+    REQUIRE(!buf.empty());
+    REQUIRE_EQ(3, buf.size());
+    REQUIRE(!buf.full());
+
     {
-        tt::ringbuf<int> buf1{ 0 };
-        tt::ringbuf<int> buf2{ 1 };
-        REQUIRE_EQ(buf1, buf2);
-        return std::nullopt;
-    },
-    +[]() -> test_return_type
-    {
-        using value_type = int;
-        using allocator_type = std::allocator<value_type>;
-        using allocator_traits = std::allocator_traits<allocator_type>;
-
-        {
-            allocator_type alloc;
-            tt::ringbuf<value_type, allocator_type> buf(0, alloc);
-            REQUIRE_EQ(buf.max_size(), allocator_traits::max_size(alloc));
-        }
-
-        {
-            struct custom_allocator : public std::allocator<value_type>
-            {
-                int id;
-            };
-            custom_allocator alloc1{ .id = 42 };
-            custom_allocator alloc2{ .id = 69 };
-            tt::ringbuf<value_type, custom_allocator> buf(42, alloc1);
-            REQUIRE_EQ(alloc1.id, buf.get_allocator().id);
-            REQUIRE_NEQ(alloc2.id, buf.get_allocator().id);
-        }
-        return std::nullopt;
-    },
-    +[]() -> test_return_type
-    {
-        tt::ringbuf<int> buf{ 1 };
-        REQUIRE_EQ(buf.begin(), buf.end());
-
-        int const val{ 42 };
-        buf.emplace_back(val);
-        REQUIRE_EQ(buf.size(), 1);
-        REQUIRE_EQ(buf.begin() + 1, buf.end());
-        REQUIRE_EQ(*buf.begin(), val);
-        return std::nullopt;
-    },
-    +[]() -> test_return_type
-    {
-        tt::ringbuf<int> buf1{ 1 };
-        REQUIRE(buf1.empty());
-        buf1.emplace_back(5);
-        REQUIRE(buf1.full());
-        buf1.clear();
-        REQUIRE(buf1.empty());
-        {
-            tt::ringbuf<int> buf2{ buf1 };
-            REQUIRE_EQ(buf2.capacity(), 1)
-
-            buf2.emplace_back(5);
-            REQUIRE_NEQ(buf1, buf2);
-        }
-        {
-            auto buf2{ buf1 };
-            buf2.emplace_back(5);
-            REQUIRE_EQ(*buf2.begin(), 5);
-            auto buf3{ buf2 };
-            buf3.emplace_back(6);
-            REQUIRE_EQ(*buf3.begin(), 6);
-
-            REQUIRE_EQ(buf3.size(), buf2.size());
-        }
-        {
-            tt::ringbuf buf2{ buf1 };
-            buf2.emplace_back(5);
-
-            tt::ringbuf<int> buf3{ buf2.capacity() };
-            REQUIRE_NEQ(buf2, buf3);
-            buf3 = buf2;
-            REQUIRE_EQ(buf2, buf3);
-        }
-        return std::nullopt;
-    },
-    +[]() -> test_return_type
-    {
-        tt::ringbuf<int> buf{ 2 };
-        buf.emplace_back(42);
-        auto const v{ buf.pop_back() };
-        REQUIRE(v.has_value())
-        REQUIRE_EQ(42, *v);
-        REQUIRE(buf.empty());
-        return std::nullopt;
-    },
-    +[]() -> test_return_type
-    {
-        tt::ringbuf<int> buf{ 2 };
-        auto const v{ buf.pop_back() };
-        REQUIRE(not v.has_value())
-        REQUIRE_EQ(std::optional<int>(), v);
-        return std::nullopt;
-    },
-    +[]() -> test_return_type
-    {
-        tt::ringbuf<int> buf{ 2 };
-        buf.emplace_back(42);
-        auto const v{ buf.pop_front() };
-        REQUIRE(v.has_value())
-        REQUIRE_EQ(42, *v);
-        REQUIRE(buf.empty());
-        return std::nullopt;
-    },
-    +[]() -> test_return_type
-    {
-        tt::ringbuf<int> buf{ 2 };
-        auto const v{ buf.pop_back() };
-        REQUIRE(not v.has_value())
-        REQUIRE_EQ(std::optional<int>(), v);
-        return std::nullopt;
-    },
-    +[]() -> std::optional<fail_info>
-    {
-        std::size_t const capacity1{ 5 };
-        tt::ringbuf<int> buf1{ capacity1 };
-
-        using std::views::all;
-        buf1.append_range(std::array{ 1, 2, 3, 4, 5, 6 } | all);
-        std::array expected{ 2, 3, 4, 5, 6 };
-        auto i{ buf1.begin() };
-        auto j{ expected.begin() };
-        for (; i != buf1.end() && j != expected.end(); ++i, ++j) REQUIRE_EQ(*i, *j);
-
-        return std::nullopt;
-    },
-    +[]() -> test_return_type
-    {
-        std::size_t const capacity1{ 5 };
-        tt::ringbuf<int> buf1{ capacity1 };
-
-        std::size_t const capacity2{ 3 };
-        tt::ringbuf<int> buf2{ capacity2 };
-
-        swap(buf1, buf2);
-        REQUIRE_EQ(capacity1, buf2.capacity());
-        REQUIRE_EQ(capacity2, buf1.capacity());
-        return std::nullopt;
-    },
-
-    // tt::ringbuf_v2
-    +[]() -> test_return_type
-    {
-        std::size_t capacity{ 2 };
-        REQUIRE(tt::detail::is_power_of_2(capacity));
-
-        tt::lock_free_ringbuf<int> buf{ capacity };
-        REQUIRE_EQ(capacity, buf.capacity())
-        REQUIRE(buf.empty());
-        REQUIRE(!buf.full());
-
-        tt::lock_free_ringbuf<int> buf2{ std::move(buf) };
-        REQUIRE_EQ(capacity, buf2.capacity())
-        REQUIRE(buf2.empty());
-        REQUIRE(!buf2.full());
-
-        return std::nullopt;
-    },
-    +[]() -> test_return_type
-    {
-        std::size_t const capacity1{ 1 };
-        REQUIRE(tt::detail::is_power_of_2(capacity1));
-
-        tt::lock_free_ringbuf<int> buf{ capacity1 };
-        buf.emplace_back(42);
-        REQUIRE(!buf.empty());
-        REQUIRE_EQ(1, buf.size());
-        REQUIRE(buf.full());
-
         auto v{ buf.pop_front() };
         REQUIRE(v.has_value());
         REQUIRE_EQ(42, *v);
-        REQUIRE(buf.empty());
-        REQUIRE_EQ(0, buf.size());
-
-        v = buf.pop_front();
-        REQUIRE(!v.has_value());
-
-        return std::nullopt;
+        REQUIRE(!buf.empty());
+        REQUIRE_EQ(2, buf.size());
     }
 
+    {
+        auto v{ buf.pop_front() };
+        REQUIRE(v.has_value());
+        REQUIRE_EQ(43, *v);
+        REQUIRE(!buf.empty());
+        REQUIRE_EQ(1, buf.size());
+    }
+
+    {
+        auto v{ buf.pop_front() };
+        REQUIRE(v.has_value());
+        REQUIRE_EQ(44, *v);
+        REQUIRE(buf.empty());
+        REQUIRE_EQ(0, buf.size());
+    }
+}
+
+TEST_CASE("lock_free_ringbuf::emplace_back/pop_front with overwrite")
+{
+    std::size_t const capacity1{ 1 };
+    REQUIRE(tt::detail::is_power_of_2(capacity1));
+
+    tt::lock_free_ringbuf<int> buf{ capacity1 };
+    buf.emplace_back(42);
+    buf.emplace_back(43);
+    buf.emplace_back(44);
+    REQUIRE(!buf.empty());
+    REQUIRE_EQ(1, buf.size());
+    REQUIRE(buf.full());
+
+    auto v{ buf.pop_front() };
+    REQUIRE(v.has_value());
+    REQUIRE_EQ(44, *v);
+    REQUIRE(buf.empty());
+    REQUIRE_EQ(0, buf.size());
+}
+
+template <typename T>
+void
+produce(tt::lock_free_ringbuf<int>& buf, std::atomic<int>& tasks_count)
+{
+    for (;;)
+    {
+        int n{ 0 };
+        do
+        {
+            if (n < 0) return;
+            std::this_thread::yield();
+        } while (!tasks_count.compare_exchange_weak(n, n - 1));
+
+        while (!buf.push_back(n)) std::this_thread::yield();
+    }
+}
+
+template <typename T>
+void
+consume(tt::lock_free_ringbuf<T>& buf, std::atomic<int>& tasks_count,
+        std::atomic<std::size_t>& consumed_count)
+{
+    for (;;)
+    {
+        if (tasks_count.load() < 0 && buf.empty()) break;
+        auto const res = buf.pop_front();
+        if (res) consumed_count.fetch_add(1);
+    }
 };
 
-int
-main()
+TEST_CASE("lock_free_ringbuf produce/comsume")
 {
-    return std::ranges::any_of(tests, run);
+    // buf bigger than task count, that's why should consume all tasks
+    std::size_t const capacity{ 1024 };
+    REQUIRE(tt::detail::is_power_of_2(capacity));
+    tt::lock_free_ringbuf<int> buf{ capacity };
+
+    int const tasks_count{ 1000 };
+
+    std::atomic<std::size_t> consumed_count{ 0 };
+    std::atomic<int> tasks_counter{ tasks_count };
+
+    std::thread t1{ produce<int>, std::ref(buf), std::ref(tasks_counter) };
+    // std::thread t2{ consume<int>, std::ref(buf), std::ref(tasks_counter),
+    //                 std::ref(consumed_count) };
+    std::thread t3{ consume<int>, std::ref(buf), std::ref(tasks_counter),
+                    std::ref(consumed_count) };
+
+    t1.join();
+    // t2.join();
+    t3.join();
+    REQUIRE_EQ(consumed_count.load(), tasks_count);
 }
