@@ -15,6 +15,16 @@ config("tt") {
     ]
 }
 
+config("doctest") {
+    inputs = [
+        "tests/doctest.h",
+    ]
+
+    configs = [
+        "//build:compiler_defaults",
+    ]
+}
+
 executable("tests") {
     sources = [
         "tests/main.test.cpp",
@@ -22,6 +32,7 @@ executable("tests") {
 
     configs = [
         ":tt",
+        ":doctest",
         "//build:debug",
     ]
 }
