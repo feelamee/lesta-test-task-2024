@@ -138,13 +138,13 @@ public:
         return capacity() - size();
     }
 
-    bool
+    void
     push_back(param_value_type v)
     {
         return emplace_back(value_type{ v });
     }
 
-    bool
+    void
     emplace_back(auto&&... args)
         requires std::is_constructible_v<value_type, decltype(args)...>
     {
@@ -153,7 +153,7 @@ public:
 
         // Here I use the idea of Dmitry Vyukov.
         // https://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue for details
-        // briefly, we enumerate each element by it position on ringbuf init and increase this
+        // briefly, we enumerate each element by it position in ringbuf ctor and increase this
         // number, when someone take exclusive ownership on it.
         // So, we (read - this thread) can know, that is not we and just return false
         for (;;)
@@ -163,7 +163,6 @@ public:
             std::int64_t const diff{ static_cast<std::int64_t>(seq) -
                                      static_cast<std::int64_t>(pos) };
 
-            if (diff < 0) return false;
             if (diff == 0 && m_last.compare_exchange_weak(pos, pos + 1, std::memory_order::seq_cst))
                 break;
             else
@@ -176,8 +175,6 @@ public:
             m_size.fetch_add(1, std::memory_order::seq_cst);
         ptr->value = value_type{ std::forward<decltype(args)>(args)... };
         ptr->seq.store(pos + size_type(1), std::memory_order::seq_cst);
-
-        return true;
     }
 
     std::optional<value_type>

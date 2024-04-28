@@ -1,3 +1,4 @@
+#include <numeric>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 
@@ -283,14 +284,14 @@ produce(tt::lock_free_ringbuf<int>& buf, std::atomic<int>& tasks_count)
 {
     for (;;)
     {
-        int n{ 0 };
+        int n{ tasks_count.load() };
         do
         {
             if (n < 0) return;
             std::this_thread::yield();
         } while (!tasks_count.compare_exchange_weak(n, n - 1));
 
-        while (!buf.push_back(n)) std::this_thread::yield();
+        buf.push_back(n);
     }
 }
 
@@ -309,24 +310,36 @@ consume(tt::lock_free_ringbuf<T>& buf, std::atomic<int>& tasks_count,
 
 TEST_CASE("lock_free_ringbuf produce/comsume")
 {
-    // buf bigger than task count, that's why should consume all tasks
-    std::size_t const capacity{ 1024 };
+    // buf bigger than task count, that's why all tasks must be consumed
+    std::size_t const capacity{ 1 };
     REQUIRE(tt::detail::is_power_of_2(capacity));
     tt::lock_free_ringbuf<int> buf{ capacity };
 
     int const tasks_count{ 1000 };
 
     std::atomic<std::size_t> consumed_count{ 0 };
-    std::atomic<int> tasks_counter{ tasks_count };
+    std::atomic<int> counter{ tasks_count };
 
-    std::thread t1{ produce<int>, std::ref(buf), std::ref(tasks_counter) };
-    // std::thread t2{ consume<int>, std::ref(buf), std::ref(tasks_counter),
-    //                 std::ref(consumed_count) };
-    std::thread t3{ consume<int>, std::ref(buf), std::ref(tasks_counter),
-                    std::ref(consumed_count) };
+    std::uint32_t const producers_count{ 1 };
+    std::uint32_t const consumers_count{ 1 };
+    std::vector<std::thread> threads;
+    threads.resize(producers_count + consumers_count);
 
-    t1.join();
-    // t2.join();
-    t3.join();
-    REQUIRE_EQ(consumed_count.load(), tasks_count);
+    // clang-format off
+    auto last =
+    std::generate_n(begin(threads), producers_count,
+                    [&] { return std::thread(produce<int>,
+                                             std::ref(buf),
+                                             std::ref(counter)); });
+    std::generate_n(last, consumers_count,
+                    [&] { return std::thread(consume<int>,
+                                             std::ref(buf),
+                                             std::ref(counter),
+                                             std::ref(consumed_count)); });
+    // clang-format on
+
+    std::ranges::for_each(threads, [](auto& t) { t.join(); });
+
+    REQUIRE_EQ(counter.load(), -1);
+    REQUIRE_EQ(consumed_count.load(), tasks_count + 1);
 }
