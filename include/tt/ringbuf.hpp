@@ -22,7 +22,6 @@ public:
     using allocator_traits = std::allocator_traits<allocator_type>;
     using value_type = allocator_traits::value_type;
     using param_value_type = detail::param<value_type>;
-    using rvalue_type = value_type&&;
 
     using pointer = allocator_traits::pointer;
     using const_pointer = allocator_traits::const_pointer;
@@ -48,7 +47,8 @@ private:
     }
 
 public:
-    ringbuf(size_type sz, allocator_type const& alloc = allocator_type()) : m_allocator{ alloc }
+    ringbuf(size_type sz, allocator_type const& alloc = allocator_type())
+        : m_allocator{ alloc }
     {
         init_with_capacity_and_allocator(sz, alloc);
     }
@@ -158,23 +158,22 @@ public:
     {
         if (full())
         {
-            if (empty())
-                return;
+            if (empty()) return;
 
             (*m_last) = value_type{ std::forward<decltype(args)>(args)... };
             increment(m_last);
             m_first = m_last;
-        }
-        else
+        } else
         {
-            allocator_traits::construct(
-                get_allocator(), m_last, std::forward<decltype(args)>(args)...);
+            allocator_traits::construct(get_allocator(), m_last,
+                                        std::forward<decltype(args)>(args)...);
             increment(m_last);
             ++m_size;
         }
     }
 
-    // TODO: specialize for `sized_range` using `drop(size(view) - capacity())`
+    // TODO: specialize for `std::ranges::sized_range` using `drop(size(view) -
+    // capacity())`
     template <std::ranges::input_range R>
     void
     append_range(std::ranges::ref_view<R> view)
@@ -192,8 +191,7 @@ public:
     std::optional<value_type>
     pop_back()
     {
-        if (empty())
-            return std::nullopt;
+        if (empty()) return std::nullopt;
 
         value_type ret{ *(--end()) };
         decrement(m_last);
@@ -205,8 +203,7 @@ public:
     std::optional<value_type>
     pop_front()
     {
-        if (empty())
-            return std::nullopt;
+        if (empty()) return std::nullopt;
 
         value_type ret{ *begin() };
         allocator_traits::destroy(get_allocator(), m_first);
@@ -268,26 +265,22 @@ public:
     friend bool
     operator==(this_type const& lhs, this_type const& rhs)
     {
-        if (lhs.size() != rhs.size())
-            return false;
+        if (lhs.size() != rhs.size()) return false;
 
-        return std::equal(lhs.begin(), lhs.end(), rhs.begin());
+        return std::ranges::equal(lhs, rhs);
     }
 
-    // private:
-public:
+private:
     void
-    increment(auto& p) const
+    increment(pointer& p) const
     {
-        if (++p == m_end)
-            p = m_buf;
+        if (++p == m_end) p = m_buf;
     }
 
     void
-    decrement(auto& p) const
+    decrement(pointer& p) const
     {
-        if (p == m_buf)
-            p = m_end;
+        if (p == m_buf) p = m_end;
         --p;
     }
 
@@ -306,7 +299,7 @@ public:
     }
 
     pointer m_buf{ nullptr };
-    pointer m_end{ 0 };
+    pointer m_end{ nullptr };
     allocator_type m_allocator;
 
     pointer m_last{ nullptr };
@@ -335,7 +328,9 @@ public:
     const container_type* m_buf{ nullptr };
 
     iterator() = default;
-    iterator(container_type const* const p_buf, value_type* p_ptr) : m_ptr{ p_ptr }, m_buf{ p_buf }
+    iterator(container_type const* const p_buf, value_type* p_ptr)
+        : m_ptr{ p_ptr }
+        , m_buf{ p_buf }
     {
     }
 
@@ -350,10 +345,8 @@ public:
         if (n > 0)
         {
             it.m_ptr = it.m_buf->add(it.m_ptr, n);
-            if (it.m_ptr == it.m_buf->m_last)
-                it.m_ptr = nullptr;
-        }
-        else if (n < 0)
+            if (it.m_ptr == it.m_buf->m_last) it.m_ptr = nullptr;
+        } else if (n < 0)
         {
             it -= -n;
         }
@@ -378,8 +371,7 @@ public:
         if (n > 0)
         {
             m_ptr = m_buf->sub(nullptr == m_ptr ? m_buf->m_last : m_ptr, n);
-        }
-        else if (n < 0)
+        } else if (n < 0)
         {
             *this += -n;
         }

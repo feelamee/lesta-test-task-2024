@@ -3,7 +3,6 @@
 #include <cstdlib>
 #include <format>
 #include <iostream>
-#include <limits>
 #include <source_location>
 #include <type_traits>
 
@@ -19,12 +18,8 @@ struct std::formatter<std::source_location>
     auto
     format(std::source_location const& obj, std::format_context& ctx) const
     {
-        return std::format_to(ctx.out(),
-                              "{}:{}:{} in '{}'",
-                              obj.file_name(),
-                              obj.line(),
-                              obj.column(),
-                              obj.function_name());
+        return std::format_to(ctx.out(), "{}:{}:{} in '{}'", obj.file_name(), obj.line(),
+                              obj.column(), obj.function_name());
     }
 };
 
@@ -49,6 +44,13 @@ unimplemented(std::source_location src = std::source_location::current())
 {
     std::cerr << std::format("[unimplemented] {}\n", src);
     std::exit(EXIT_FAILURE);
+}
+
+template <std::unsigned_integral T>
+bool
+is_power_of_2(T const v)
+{
+    return v > 0 && !(v & (v - 1));
 }
 
 } // namespace tt::detail

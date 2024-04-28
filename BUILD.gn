@@ -5,8 +5,19 @@ config("tt") {
 
     inputs = [
         "include/tt/ringbuf.hpp",
+        "include/tt/lock_free_ringbuf.hpp",
         "include/tt/iseven.hpp",
         "include/tt/detail.hpp",
+    ]
+
+    configs = [
+        "//build:compiler_defaults",
+    ]
+}
+
+config("doctest") {
+    inputs = [
+        "tests/doctest.h",
     ]
 
     configs = [
@@ -21,7 +32,8 @@ executable("tests") {
 
     configs = [
         ":tt",
-        "//build:debug"
+        ":doctest",
+        "//build:debug",
     ]
 }
 
