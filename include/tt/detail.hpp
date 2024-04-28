@@ -1,6 +1,5 @@
 #pragma once
 
-#include <concepts>
 #include <cstdlib>
 #include <format>
 #include <iostream>
@@ -19,12 +18,8 @@ struct std::formatter<std::source_location>
     auto
     format(std::source_location const& obj, std::format_context& ctx) const
     {
-        return std::format_to(ctx.out(),
-                              "{}:{}:{} in '{}'",
-                              obj.file_name(),
-                              obj.line(),
-                              obj.column(),
-                              obj.function_name());
+        return std::format_to(ctx.out(), "{}:{}:{} in '{}'", obj.file_name(), obj.line(),
+                              obj.column(), obj.function_name());
     }
 };
 

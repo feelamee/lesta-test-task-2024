@@ -1,6 +1,5 @@
 #pragma once
 
-#include <optional>
 #include <tt/detail.hpp>
 
 #include <algorithm>
@@ -8,6 +7,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <ranges>
 
 namespace tt
@@ -105,11 +105,7 @@ public:
     size_type
     size() const noexcept
     {
-        std::int64_t const diff{
-            static_cast<std::int64_t>(m_last.load(std::memory_order::seq_cst)) -
-            static_cast<std::int64_t>(m_first.load(std::memory_order::seq_cst))
-        };
-        return diff >= 0 ? diff : capacity() - diff;
+        return m_size.load(std::memory_order::seq_cst);
     }
 
     size_type
@@ -162,7 +158,7 @@ public:
         // So, we (read - this thread) can know, that is not we and just return false
         for (;;)
         {
-            ptr = m_buf_begin + (pos & capacity());
+            ptr = m_buf_begin + (pos & mask());
             std::size_t const seq{ ptr->seq.load(std::memory_order::seq_cst) };
             std::int64_t const diff{ static_cast<std::int64_t>(seq) -
                                      static_cast<std::int64_t>(pos) };
@@ -174,6 +170,10 @@ public:
                 pos = m_last.load(std::memory_order::seq_cst);
         }
 
+        if (full())
+            m_first.fetch_add(1, std::memory_order::seq_cst);
+        else
+            m_size.fetch_add(1, std::memory_order::seq_cst);
         ptr->value = value_type{ std::forward<decltype(args)>(args)... };
         ptr->seq.store(pos + size_type(1), std::memory_order::seq_cst);
 
@@ -202,6 +202,7 @@ public:
         }
 
         value_type ret{ std::move(ptr->value) };
+        m_size.fetch_add(-1, std::memory_order::seq_cst);
         ptr->seq.store(pos + mask() + size_type(1), std::memory_order::seq_cst);
 
         return ret;
@@ -224,9 +225,11 @@ public:
     }
 
 private:
+    ///! @pre capacity() > 0
     size_type
     mask() const
     {
+        assert(capacity() > 0);
         return capacity() - 1;
     }
 
@@ -248,6 +251,7 @@ private:
 
     std::atomic<size_type> m_last{ 0 };
     std::atomic<size_type> m_first{ 0 };
+    std::atomic<size_type> m_size{ 0 };
 
     // TODO: use inheritance to optimize size of ringbuf,
     //       if allocator_type is stateless
@@ -255,6 +259,7 @@ private:
 
     static_assert(decltype(m_last)::is_always_lock_free);
     static_assert(decltype(m_first)::is_always_lock_free);
+    static_assert(decltype(m_size)::is_always_lock_free);
 };
 
 } // namespace tt
