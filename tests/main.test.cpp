@@ -1,4 +1,3 @@
-#include <numeric>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 
@@ -163,6 +162,26 @@ TEST_CASE("ringbuf::swap")
     REQUIRE_EQ(capacity2, buf1.capacity());
 }
 
+TEST_CASE("ringbuf::emplace_back/pop_front with overwrite")
+{
+    std::size_t const capacity1{ 1 };
+    REQUIRE(tt::detail::is_power_of_2(capacity1));
+
+    tt::lock_free_ringbuf<int> buf{ capacity1 };
+    buf.emplace_back(42);
+    buf.emplace_back(43);
+    buf.emplace_back(44);
+    REQUIRE(!buf.empty());
+    REQUIRE_EQ(1, buf.size());
+    REQUIRE(buf.full());
+
+    auto v{ buf.pop_front() };
+    REQUIRE(v.has_value());
+    REQUIRE_EQ(44, *v);
+    REQUIRE(buf.empty());
+    REQUIRE_EQ(0, buf.size());
+}
+
 TEST_CASE("lock_free_ringbuf empty/move ctor")
 {
     std::size_t capacity{ 2 };
@@ -308,9 +327,8 @@ consume(tt::lock_free_ringbuf<T>& buf, std::atomic<int>& tasks_count,
     }
 };
 
-TEST_CASE("lock_free_ringbuf produce/comsume")
+TEST_CASE("lock_free_ringbuf produce/consume")
 {
-    // buf bigger than task count, that's why all tasks must be consumed
     std::size_t const capacity{ 1 };
     REQUIRE(tt::detail::is_power_of_2(capacity));
     tt::lock_free_ringbuf<int> buf{ capacity };
