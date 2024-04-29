@@ -141,7 +141,7 @@ public:
     void
     push_back(param_value_type v)
     {
-        return emplace_back(value_type{ v });
+        return emplace_back(v);
     }
 
     void
