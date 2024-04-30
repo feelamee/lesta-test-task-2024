@@ -7,6 +7,7 @@ config("tt") {
         "include/tt/ringbuf.hpp",
         "include/tt/lock_free_ringbuf.hpp",
         "include/tt/iseven.hpp",
+        "include/tt/sort.hpp",
         "include/tt/detail.hpp",
     ]
 

@@ -1,10 +1,11 @@
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
-#include "doctest.h"
-
 #include <tt/detail.hpp>
 #include <tt/iseven.hpp>
 #include <tt/lock_free_ringbuf.hpp>
 #include <tt/ringbuf.hpp>
+#include <tt/sort.hpp>
+
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include "doctest.h"
 
 #include <thread>
 
@@ -52,8 +53,10 @@ TEST_CASE("ringbuf::max_size")
         {
             int id;
         };
-        custom_allocator alloc1{ .id = 42 };
-        custom_allocator alloc2{ .id = 69 };
+        custom_allocator alloc1;
+        alloc1.id = 42; // missing initializer on gcc when using designated initializer
+        custom_allocator alloc2;
+        alloc1.id = 69; // missing initializer on gcc when using designated initializer
         tt::ringbuf<value_type, custom_allocator> buf(42, alloc1);
         REQUIRE_EQ(alloc1.id, buf.get_allocator().id);
         REQUIRE_NE(alloc2.id, buf.get_allocator().id);
@@ -160,6 +163,26 @@ TEST_CASE("ringbuf::swap")
     swap(buf1, buf2);
     REQUIRE_EQ(capacity1, buf2.capacity());
     REQUIRE_EQ(capacity2, buf1.capacity());
+}
+
+TEST_CASE("ringbuf::emplace_back/pop_front with overwrite")
+{
+    std::size_t const capacity1{ 1 };
+    REQUIRE(tt::detail::is_power_of_2(capacity1));
+
+    tt::lock_free_ringbuf<int> buf{ capacity1 };
+    buf.emplace_back(42);
+    buf.emplace_back(43);
+    buf.emplace_back(44);
+    REQUIRE(!buf.empty());
+    REQUIRE_EQ(1, buf.size());
+    REQUIRE(buf.full());
+
+    auto v{ buf.pop_front() };
+    REQUIRE(v.has_value());
+    REQUIRE_EQ(44, *v);
+    REQUIRE(buf.empty());
+    REQUIRE_EQ(0, buf.size());
 }
 
 TEST_CASE("lock_free_ringbuf empty/move ctor")
@@ -307,9 +330,8 @@ consume(tt::lock_free_ringbuf<T>& buf, std::atomic<int>& tasks_count,
     }
 };
 
-TEST_CASE("lock_free_ringbuf produce/comsume")
+TEST_CASE("lock_free_ringbuf produce/consume")
 {
-    // buf bigger than task count, that's why all tasks must be consumed
     std::size_t const capacity{ 1 };
     REQUIRE(tt::detail::is_power_of_2(capacity));
     tt::lock_free_ringbuf<int> buf{ capacity };
@@ -341,4 +363,56 @@ TEST_CASE("lock_free_ringbuf produce/comsume")
 
     REQUIRE_EQ(counter.load(), -1);
     REQUIRE_EQ(consumed_count.load(), tasks_count + 1);
+}
+
+void
+println(std::ranges::range auto&& seq)
+{
+    std::cout << "[";
+    for (auto const& el : seq) std::cout << std::format(" {} ", el);
+    std::cout << "]" << std::endl;
+};
+
+template <typename... Args>
+void
+print(std::format_string<Args...> fmt, Args&&... args)
+{
+    std::cout << std::format(fmt, std::forward<Args>(args)...);
+};
+
+template <typename... Args>
+void
+println(std::format_string<Args...> fmt, Args&&... args)
+{
+    std::cout << std::format(fmt, std::forward<Args>(args)...) << std::endl;
+};
+
+TEST_CASE("counting sort on empty array")
+{
+    std::vector<int> const ar;
+    REQUIRE(ar.empty());
+    REQUIRE(std::ranges::is_sorted(tt::counting_sort(ar, 0)));
+}
+
+TEST_CASE("counting sort with projection")
+{
+    struct num
+    {
+        num() = default;
+        num(int p_n)
+            : n{ p_n }
+        {
+        }
+        int n{ 0 };
+    };
+    std::vector<num> const ar{ 3, 5, 1, 8, 10, 0, 14 };
+    auto const max{ *std::ranges::max_element(ar, {}, &num::n) };
+    REQUIRE(std::ranges::is_sorted(tt::counting_sort(ar, max.n, {}, &num::n), {}, &num::n));
+}
+
+TEST_CASE("counting sort")
+{
+    std::vector const ar{ 3, 5, 1, 8, 10, 0, 14 };
+    auto const max{ *std::ranges::max_element(ar) };
+    REQUIRE(std::ranges::is_sorted(tt::counting_sort(ar, max)));
 }
