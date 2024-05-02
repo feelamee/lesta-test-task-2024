@@ -2,6 +2,8 @@
 
 #include <tt/detail.hpp>
 
+#include <algorithm>
+#include <concepts>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -57,14 +59,14 @@ public:
     using key_type = KeyType;
 
     // TODO: think about adding execution policy
-    template <typename InRng, typename OutRng, typename KeyFn = std::identity,
-              typename Proj = std::identity>
-        requires std::ranges::random_access_range<InRng> &&
-                 std::ranges::random_access_range<OutRng> &&
-                 detail::invoke_result_is_convertible_to_v<
-                     KeyFn, Proj, std::ranges::range_value_t<InRng>, key_type>
+    template <typename Rng, typename KeyFn = std::identity, typename Proj = std::identity>
+        requires requires(KeyFn key_fn, Proj proj, std::ranges::range_value_t<Rng> v) {
+            {
+                std::invoke(key_fn, std::invoke(proj, v))
+            } -> std::convertible_to<key_type>;
+        }
     constexpr void
-    operator()(InRng&& r, key_type max, OutRng& out, KeyFn key_fn = {}, Proj proj = {}) const
+    operator()(Rng&& r, key_type max, KeyFn key_fn = {}, Proj proj = {}) const
     {
         using counter_alloc = std::allocator_traits<Alloc>::template rebind_alloc<key_type>;
         using std::views::pairwise, std::views::transform, std::views::reverse;
@@ -75,28 +77,30 @@ public:
 
         for (auto [l, r] : count | pairwise) r += l;
 
+        std::decay_t<Rng> out(r.size());
         for (auto const& el : r | reverse | transform(proj))
         {
             auto& i{ count[key_fn(el)] };
             --i;
-            out[i] = el;
+            out[i] = std::move(el);
         }
+        std::ranges::move(out, begin(r));
     }
 
-    template <typename InRng, typename OutRng, typename KeyFn = std::identity,
-              typename Proj = std::identity>
-        requires std::ranges::random_access_range<InRng> &&
-                 std::ranges::random_access_range<OutRng> &&
-                 detail::invoke_result_is_convertible_to_v<
-                     KeyFn, Proj, std::ranges::range_value_t<InRng>, key_type>
+    template <typename Rng, typename KeyFn = std::identity, typename Proj = std::identity>
+        requires requires(KeyFn key_fn, Proj proj, std::ranges::range_value_t<Rng> v) {
+            {
+                std::invoke(key_fn, std::invoke(proj, v))
+            } -> std::convertible_to<key_type>;
+        }
     constexpr void
-    operator()(InRng&& r, OutRng& out, KeyFn key_fn = {}, Proj proj = {}) const
+    operator()(Rng&& r, KeyFn key_fn = {}, Proj proj = {}) const
     {
         auto const composed = [&key_fn, &proj](auto const& el) { return key_fn(proj(el)); };
         auto const max{ std::ranges::max_element(r, {}, composed) };
         if (max != end(r))
         {
-            (*this)(std::forward<InRng>(r), *max, out, std::move(key_fn), std::move(proj));
+            (*this)(std::forward<Rng>(r), std::move(*max), std::move(key_fn), std::move(proj));
         }
     }
 
@@ -122,37 +126,39 @@ public:
 public:
     using radix_key_type = std::uint8_t;
 
-    template <typename InRng, typename KeyFn = std::identity, typename Proj = std::identity>
-        requires std::ranges::random_access_range<InRng> &&
-                 detail::invoke_result_is_convertible_to_v<
-                     KeyFn, Proj, std::ranges::range_value_t<InRng>, radix_key_type>
+    template <typename Rng, typename KeyFn = std::identity, typename Proj = std::identity>
+        requires requires(KeyFn key_fn, Proj proj, std::ranges::range_value_t<Rng> v) {
+            {
+                std::invoke(key_fn, std::invoke(proj, v))
+            } -> std::convertible_to<radix_key_type>;
+        }
     constexpr auto
-    operator()(InRng& r, KeyFn key_fn = {}, Proj proj = {}) const
+    operator()(Rng&& r, KeyFn key_fn = {}, Proj proj = {}) const
     {
-        using std::views::iota, std::views::stride;
+        using std::views::iota, std::views::stride, std::ranges::size, std::ranges::move;
 
-        using value_type = std::ranges::range_value_t<InRng>;
+        using value_type = std::ranges::range_value_t<Rng>;
         using proj_result = std::invoke_result_t<Proj, value_type>;
         using key_fn_result = std::invoke_result_t<KeyFn, proj_result>;
         using key_type = std::decay_t<key_fn_result>;
 
         using allocator_type = std::pmr::polymorphic_allocator<radix_key_type>;
         auto const max{ std::numeric_limits<radix_key_type>::max() };
+
         radix_key_type buf[static_cast<std::size_t>(max) + 1];
         std::pmr::monotonic_buffer_resource res{ buf, max + 1, std::pmr::null_memory_resource() };
         allocator_type alloc{ &res };
         counting_sort_t<radix_key_type, allocator_type> sort{ alloc };
 
-        InRng out{ r };
+        std::decay_t<Rng> out(size(r));
         auto const digits{ std::numeric_limits<key_type>::digits };
         for (auto const radix : iota(0, digits) | stride(8))
         {
             sort(
-                r, max, out,
+                r, max,
                 [&key_fn, radix](auto const& el) -> radix_key_type
                 { return (key_fn(el) >> radix) & static_cast<key_type>(0xFF); },
                 proj);
-            r = out;
             res.release();
         }
     }

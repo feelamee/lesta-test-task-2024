@@ -398,8 +398,8 @@ TEST_CASE("counting sort on empty array")
 
     std::vector<int> const ar;
     REQUIRE(ar.empty());
-    std::vector<int> res(ar.size());
-    tt::counting_sort(ar, 0, res);
+    std::vector<int> res{ ar };
+    tt::counting_sort(res, 0);
     REQUIRE(std::ranges::is_sorted(res));
 }
 
@@ -417,8 +417,8 @@ TEST_CASE("counting sort with projection")
     };
     std::vector<num> const ar{ 3, 5, 1, 8, 10, 0, 14 };
     auto const max{ *std::ranges::max_element(ar, {}, &num::n) };
-    std::vector<num> res(ar.size());
-    tt::counting_sort(ar, max.n, res, {}, &num::n);
+    std::vector<num> res{ ar };
+    tt::counting_sort(res, max.n, {}, &num::n);
     REQUIRE(std::ranges::is_sorted(res, {}, &num::n));
 }
 
@@ -428,8 +428,8 @@ TEST_CASE("counting sort")
 
     std::vector<int> const ar{ 3, 5, 1, 8, 10, 0, 14 };
     auto const max{ *std::ranges::max_element(ar) };
-    std::vector<int> res(ar.size());
-    tt::counting_sort(ar, max, res);
+    std::vector<int> res{ ar };
+    tt::counting_sort(res, max);
     REQUIRE(std::ranges::is_sorted(res));
 }
 
@@ -438,8 +438,8 @@ TEST_CASE("counting sort without max parameter")
     using std::views::all;
 
     std::vector<int> const ar{ 3, 5, 1, 8, 10, 0, 14 };
-    std::vector<int> res(ar.size());
-    tt::counting_sort(ar, res);
+    std::vector<int> res{ ar };
+    tt::counting_sort(res);
     REQUIRE(std::ranges::is_sorted(res));
 }
 

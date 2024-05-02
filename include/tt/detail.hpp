@@ -53,14 +53,4 @@ is_power_of_2(T const v)
     return v > 0 && !(v & (v - 1));
 }
 
-template <typename F1, typename F2, typename Arg, typename Expected>
-struct invoke_result_is_convertible_to
-    : public std::is_convertible<std::invoke_result_t<F1, std::invoke_result_t<F2, Arg>>, Expected>
-{
-};
-
-template <typename F1, typename F2, typename Arg, typename Expected>
-inline constexpr bool invoke_result_is_convertible_to_v =
-    invoke_result_is_convertible_to<F1, F2, Arg, Expected>::value;
-
 } // namespace tt::detail
