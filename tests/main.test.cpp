@@ -7,6 +7,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 
+#include <ranges>
 #include <thread>
 
 TEST_CASE("iseven")
@@ -365,20 +366,24 @@ TEST_CASE("lock_free_ringbuf produce/consume")
     REQUIRE_EQ(consumed_count.load(), tasks_count + 1);
 }
 
-void
-println(std::ranges::range auto&& seq)
+namespace doctest
 {
-    std::cout << "[";
-    for (auto const& el : seq) std::cout << std::format(" {} ", el);
-    std::cout << "]" << std::endl;
+
+template <typename T>
+struct StringMaker<std::vector<T>>
+{
+    static String
+    convert(const std::vector<T>& seq)
+    {
+        std::stringstream out;
+        out << '[';
+        for (auto const& el : seq) out << std::format(" {} ", el);
+        out << ']' << std::endl;
+        return doctest::String(out.str().c_str());
+    }
 };
 
-template <typename... Args>
-void
-print(std::format_string<Args...> fmt, Args&&... args)
-{
-    std::cout << std::format(fmt, std::forward<Args>(args)...);
-};
+} // namespace doctest
 
 template <typename... Args>
 void
@@ -389,13 +394,18 @@ println(std::format_string<Args...> fmt, Args&&... args)
 
 TEST_CASE("counting sort on empty array")
 {
+    using std::views::all;
+
     std::vector<int> const ar;
     REQUIRE(ar.empty());
-    REQUIRE(std::ranges::is_sorted(tt::counting_sort(ar, 0)));
+    std::vector<int> res(ar.size());
+    tt::counting_sort(ar, 0, res);
+    REQUIRE(std::ranges::is_sorted(res));
 }
 
 TEST_CASE("counting sort with projection")
 {
+    using std::views::all;
     struct num
     {
         num() = default;
@@ -407,12 +417,75 @@ TEST_CASE("counting sort with projection")
     };
     std::vector<num> const ar{ 3, 5, 1, 8, 10, 0, 14 };
     auto const max{ *std::ranges::max_element(ar, {}, &num::n) };
-    REQUIRE(std::ranges::is_sorted(tt::counting_sort(ar, max.n, {}, &num::n), {}, &num::n));
+    std::vector<num> res(ar.size());
+    tt::counting_sort(ar, max.n, res, {}, &num::n);
+    REQUIRE(std::ranges::is_sorted(res, {}, &num::n));
 }
 
 TEST_CASE("counting sort")
 {
-    std::vector const ar{ 3, 5, 1, 8, 10, 0, 14 };
+    using std::views::all;
+
+    std::vector<int> const ar{ 3, 5, 1, 8, 10, 0, 14 };
     auto const max{ *std::ranges::max_element(ar) };
-    REQUIRE(std::ranges::is_sorted(tt::counting_sort(ar, max)));
+    std::vector<int> res(ar.size());
+    tt::counting_sort(ar, max, res);
+    REQUIRE(std::ranges::is_sorted(res));
+}
+
+TEST_CASE("counting sort without max parameter")
+{
+    using std::views::all;
+
+    std::vector<int> const ar{ 3, 5, 1, 8, 10, 0, 14 };
+    std::vector<int> res(ar.size());
+    tt::counting_sort(ar, res);
+    REQUIRE(std::ranges::is_sorted(res));
+}
+
+TEST_CASE("radix sort")
+{
+    using std::views::all;
+    auto const sorted = [](auto input)
+    {
+        std::ranges::sort(input);
+        return input;
+    };
+
+    SUBCASE("1")
+    {
+        std::vector<int> const ar{ 3, 5, 1, 8, 10, 0, 14 };
+        std::vector<int> res{ ar };
+        tt::radix_sort(res);
+        CHECK_EQ(res, sorted(ar));
+    }
+    SUBCASE("2")
+    {
+        std::vector<int> const ar{ 8, 7, 6, 5, 4, 3, 2, 1 };
+        std::vector<int> res{ ar };
+        tt::radix_sort(res);
+        CHECK_EQ(res, sorted(ar));
+    }
+    SUBCASE("3")
+    {
+        std::vector<int> const ar{ 508, 507, 606, 505 };
+        std::vector<int> res{ ar };
+        tt::radix_sort(res);
+        CHECK_EQ(res, sorted(ar));
+    }
+    SUBCASE("4")
+    {
+        std::vector<int> ar(10);
+        std::ranges::generate(ar, [] { return std::rand() % 1000; });
+        std::vector<int> res{ ar };
+        tt::radix_sort(res);
+        CHECK_EQ(res, sorted(ar));
+    }
+    SUBCASE("5")
+    {
+        std::vector<int> ar{ 5321, 4, 41, 510, 140, 0, 43, 3, 31231 };
+        std::vector<int> res{ ar };
+        tt::radix_sort(res);
+        CHECK_EQ(res, sorted(ar));
+    }
 }

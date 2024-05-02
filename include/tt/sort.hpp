@@ -2,10 +2,10 @@
 
 #include <tt/detail.hpp>
 
-#include <cassert>
 #include <functional>
 #include <limits>
 #include <memory>
+#include <memory_resource>
 #include <ranges>
 #include <type_traits>
 
@@ -32,41 +32,44 @@ namespace tt
     The most interesting awaits you in the end - benchmarks
 */
 
-template <typename Alloc = std::allocator<std::byte>>
+/*
+    Counting sort
+
+    time - O(n + k)
+    memory - O(n + k)
+
+    where n is number of elements in input sequence
+          k is the maximum value of key values
+
+    This is not comaprable, not in-place, stable sort
+    So, it have good asymptotic complexity, but..
+    if k much bigger n, it will use a lot of memory for nothing
+*/
+template <std::unsigned_integral KeyType, typename Alloc = std::allocator<std::byte>>
 struct counting_sort_t
 {
+public:
     constexpr counting_sort_t(Alloc const& p_alloc = Alloc{})
         : alloc{ p_alloc }
     {
     }
 
-    using key_type = std::size_t;
+    using key_type = KeyType;
 
-    ///! @pre max < std::numeric_limits<key_type>::max()
-    template <typename Rng, typename KeyFn = std::identity, typename Proj = std::identity>
-        requires std::ranges::constant_range<Rng> && std::ranges::random_access_range<Rng>
-    constexpr auto
-    operator()(Rng&& r, key_type max, KeyFn key_fn = {}, Proj proj = {}) const
+    // TODO: think about adding execution policy
+    template <typename InRng, typename OutRng, typename KeyFn = std::identity,
+              typename Proj = std::identity>
+        requires std::ranges::random_access_range<InRng> &&
+                 std::ranges::random_access_range<OutRng> &&
+                 detail::invoke_result_is_convertible_to_v<
+                     KeyFn, Proj, std::ranges::range_value_t<InRng>, key_type>
+    constexpr void
+    operator()(InRng&& r, key_type max, OutRng& out, KeyFn key_fn = {}, Proj proj = {}) const
     {
-        assert(max < std::numeric_limits<key_type>::max());
-
-        using value_type = std::ranges::range_value_t<Rng>;
-        {
-            using key_fn_result = std::invoke_result_t<KeyFn, value_type>;
-            using proj_result = std::invoke_result_t<Proj, key_fn_result>;
-            static_assert(std::convertible_to<proj_result, key_type>);
-        }
-
-        using value_type_alloc = std::allocator_traits<Alloc>::template rebind_alloc<value_type>;
-
-        using counter_type = std::make_signed_t<key_type>;
-        using counter_alloc = std::allocator_traits<Alloc>::template rebind_alloc<counter_type>;
-
-        using std::ranges::size, std::ranges::owning_view;
+        using counter_alloc = std::allocator_traits<Alloc>::template rebind_alloc<key_type>;
         using std::views::pairwise, std::views::transform, std::views::reverse;
 
-        std::vector<counter_type, counter_alloc> count{ max + 1, 0uz, alloc };
-        std::vector<value_type, value_type_alloc> res{ size(r), value_type{}, alloc };
+        std::vector<key_type, counter_alloc> count{ static_cast<std::size_t>(max) + 1, 0uz, alloc };
 
         for (auto const& i : r | transform(proj) | transform(key_fn)) count[i] += 1;
 
@@ -76,16 +79,87 @@ struct counting_sort_t
         {
             auto& i{ count[key_fn(el)] };
             --i;
-            res[i] = el;
+            out[i] = el;
         }
+    }
 
-        return owning_view(std::move(res));
+    template <typename InRng, typename OutRng, typename KeyFn = std::identity,
+              typename Proj = std::identity>
+        requires std::ranges::random_access_range<InRng> &&
+                 std::ranges::random_access_range<OutRng> &&
+                 detail::invoke_result_is_convertible_to_v<
+                     KeyFn, Proj, std::ranges::range_value_t<InRng>, key_type>
+    constexpr void
+    operator()(InRng&& r, OutRng& out, KeyFn key_fn = {}, Proj proj = {}) const
+    {
+        auto const composed = [&key_fn, &proj](auto const& el) { return key_fn(proj(el)); };
+        auto const max{ std::ranges::max_element(r, {}, composed) };
+        if (max != end(r))
+        {
+            (*this)(std::forward<InRng>(r), *max, out, std::move(key_fn), std::move(proj));
+        }
     }
 
 private:
     Alloc alloc;
 };
+inline constexpr counting_sort_t<std::size_t> counting_sort{};
 
-static constexpr counting_sort_t counting_sort;
+/*
+ */
+
+template <typename Alloc = std::allocator<std::byte>>
+struct radix_sort_t
+{
+public:
+    constexpr radix_sort_t(Alloc const& p_alloc = Alloc{})
+        : alloc{ p_alloc }
+    {
+    }
+
+    // TODO: think about adding execution policy
+
+public:
+    using radix_key_type = std::uint8_t;
+
+    template <typename InRng, typename KeyFn = std::identity, typename Proj = std::identity>
+        requires std::ranges::random_access_range<InRng> &&
+                 detail::invoke_result_is_convertible_to_v<
+                     KeyFn, Proj, std::ranges::range_value_t<InRng>, radix_key_type>
+    constexpr auto
+    operator()(InRng& r, KeyFn key_fn = {}, Proj proj = {}) const
+    {
+        using std::views::iota, std::views::stride;
+
+        using value_type = std::ranges::range_value_t<InRng>;
+        using proj_result = std::invoke_result_t<Proj, value_type>;
+        using key_fn_result = std::invoke_result_t<KeyFn, proj_result>;
+        using key_type = std::decay_t<key_fn_result>;
+
+        using allocator_type = std::pmr::polymorphic_allocator<radix_key_type>;
+        auto const max{ std::numeric_limits<radix_key_type>::max() };
+        radix_key_type buf[static_cast<std::size_t>(max) + 1];
+        std::pmr::monotonic_buffer_resource res{ buf, max + 1, std::pmr::null_memory_resource() };
+        allocator_type alloc{ &res };
+        counting_sort_t<radix_key_type, allocator_type> sort{ alloc };
+
+        InRng out{ r };
+        auto const digits{ std::numeric_limits<key_type>::digits };
+        for (auto const radix : iota(0, digits) | stride(8))
+        {
+            sort(
+                r, max, out,
+                [&key_fn, radix](auto const& el) -> radix_key_type
+                { return (key_fn(el) >> radix) & static_cast<key_type>(0xFF); },
+                proj);
+            r = out;
+            res.release();
+        }
+    }
+
+private:
+    Alloc alloc;
+};
+inline constexpr radix_sort_t radix_sort{};
 
 } // namespace tt
