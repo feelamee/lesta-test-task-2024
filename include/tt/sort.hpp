@@ -3,7 +3,6 @@
 #include <tt/detail.hpp>
 
 #include <algorithm>
-#include <concepts>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -111,61 +110,42 @@ inline constexpr counting_sort_t<std::size_t> counting_sort{};
 
 /*
  */
-
-template <typename Alloc = std::allocator<std::byte>>
-struct radix_sort_t
-{
-public:
-    constexpr radix_sort_t(Alloc const& p_alloc = Alloc{})
-        : alloc{ p_alloc }
-    {
-    }
-
-    // TODO: think about adding execution policy
-
-public:
-    using radix_key_type = std::uint8_t;
-
-    template <typename Rng, typename KeyFn = std::identity, typename Proj = std::identity>
-        requires requires(KeyFn key_fn, Proj proj, std::ranges::range_value_t<Rng> v) {
-            {
-                std::invoke(key_fn, std::invoke(proj, v))
-            } -> std::convertible_to<radix_key_type>;
-        }
-    constexpr auto
-    operator()(Rng&& r, KeyFn key_fn = {}, Proj proj = {}) const
-    {
-        using std::views::iota, std::views::stride, std::ranges::size, std::ranges::move;
-
-        using value_type = std::ranges::range_value_t<Rng>;
-        using proj_result = std::invoke_result_t<Proj, value_type>;
-        using key_fn_result = std::invoke_result_t<KeyFn, proj_result>;
-        using key_type = std::decay_t<key_fn_result>;
-
-        using allocator_type = std::pmr::polymorphic_allocator<radix_key_type>;
-        auto const max{ std::numeric_limits<radix_key_type>::max() };
-
-        radix_key_type buf[static_cast<std::size_t>(max) + 1];
-        std::pmr::monotonic_buffer_resource res{ buf, max + 1, std::pmr::null_memory_resource() };
-        allocator_type alloc{ &res };
-        counting_sort_t<radix_key_type, allocator_type> sort{ alloc };
-
-        std::decay_t<Rng> out(size(r));
-        auto const digits{ std::numeric_limits<key_type>::digits };
-        for (auto const radix : iota(0, digits) | stride(8))
+using radix_key_type = std::uint8_t;
+template <typename Rng, typename KeyFn = std::identity, typename Proj = std::identity>
+    requires requires(KeyFn key_fn, Proj proj, std::ranges::range_value_t<Rng> v) {
         {
-            sort(
-                r, max,
-                [&key_fn, radix](auto const& el) -> radix_key_type
-                { return (key_fn(el) >> radix) & static_cast<key_type>(0xFF); },
-                proj);
-            res.release();
-        }
+            std::invoke(key_fn, std::invoke(proj, v))
+        } -> std::convertible_to<radix_key_type>;
     }
+constexpr auto
+radix_sort(Rng&& r, KeyFn key_fn = {}, Proj proj = {})
+{
+    using std::views::iota, std::views::stride, std::ranges::size, std::ranges::move;
 
-private:
-    Alloc alloc;
-};
-inline constexpr radix_sort_t radix_sort{};
+    using value_type = std::ranges::range_value_t<Rng>;
+    using proj_result = std::invoke_result_t<Proj, value_type>;
+    using key_fn_result = std::invoke_result_t<KeyFn, proj_result>;
+    using key_type = std::decay_t<key_fn_result>;
+
+    using allocator_type = std::pmr::polymorphic_allocator<radix_key_type>;
+    auto const max{ std::numeric_limits<radix_key_type>::max() };
+
+    radix_key_type buf[static_cast<std::size_t>(max) + 1];
+    std::pmr::monotonic_buffer_resource res{ buf, max + 1, std::pmr::null_memory_resource() };
+    allocator_type alloc{ &res };
+    counting_sort_t<radix_key_type, allocator_type> sort{ alloc };
+
+    std::decay_t<Rng> out(size(r));
+    auto const digits{ std::numeric_limits<key_type>::digits };
+    for (auto const radix : iota(0, digits) | stride(8))
+    {
+        sort(
+            r, max,
+            [&key_fn, radix](auto const& el) -> radix_key_type
+            { return (key_fn(el) >> radix) & static_cast<key_type>(0xFF); },
+            proj);
+        res.release();
+    }
+}
 
 } // namespace tt
