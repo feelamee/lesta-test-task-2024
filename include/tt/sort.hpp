@@ -109,15 +109,57 @@ private:
 inline constexpr counting_sort_t<std::size_t> counting_sort{};
 
 /*
+    Radix sort
+
+    time - O(r * k * n)
+    space - O(1)
+
+    where r is count of radices in radix_key_type
+          k is the maximum value of key values
+          n is count of elements in input sequence
+
+    I call counting_sort r times.
+    So time complexity is multiplication of r and time complexity of counting sort
+
+    Radix sort is pretty similar to counting,
+    but try to solve it problem - additional memory.
  */
-using radix_key_type = std::uint8_t;
-template <typename Rng, typename KeyFn = std::identity, typename Proj = std::identity>
+
+template <typename T, typename KeyType>
+concept radix_sort_traits = requires(std::size_t cur_radix, KeyType key) {
+    typename T::radix_type;
+    requires std::ranges::input_range<decltype(T::template radices<KeyType>)>;
+    {
+        std::invoke(std::invoke(T::template radix<KeyType>, cur_radix), key)
+    } -> std::same_as<typename T::radix_type>;
+};
+
+struct default_radix_sort_traits
+{
+    using radix_type = std::uint8_t;
+
+    template <typename KeyType>
+    inline static constexpr auto radices{
+        std::views::iota(0UL, detail::divceil(sizeof(KeyType), sizeof(radix_type)))
+    };
+
+    template <typename KeyType>
+    inline static constexpr auto radix = [](std::size_t const cur_radix)
+    {
+        return [=](auto const key) -> radix_type
+        { return (key >> (cur_radix * 8)) & static_cast<KeyType>(0xFF); };
+    };
+};
+static_assert(radix_sort_traits<default_radix_sort_traits, std::size_t>);
+
+template <typename Rng, typename KeyFn = std::identity, typename Proj = std::identity,
+          typename Traits = default_radix_sort_traits>
     requires requires(KeyFn key_fn, Proj proj, std::ranges::range_value_t<Rng> v) {
         {
             std::invoke(key_fn, std::invoke(proj, v))
-        } -> std::convertible_to<radix_key_type>;
+        } -> std::convertible_to<typename Traits::radix_type>;
     }
-constexpr auto
+constexpr void
 radix_sort(Rng&& r, KeyFn key_fn = {}, Proj proj = {})
 {
     using std::views::iota, std::views::stride, std::ranges::size, std::ranges::move;
@@ -126,23 +168,25 @@ radix_sort(Rng&& r, KeyFn key_fn = {}, Proj proj = {})
     using proj_result = std::invoke_result_t<Proj, value_type>;
     using key_fn_result = std::invoke_result_t<KeyFn, proj_result>;
     using key_type = std::decay_t<key_fn_result>;
+    static_assert(radix_sort_traits<Traits, key_type>);
+    using radix_type = typename Traits::radix_type;
 
-    using allocator_type = std::pmr::polymorphic_allocator<radix_key_type>;
-    auto const max{ std::numeric_limits<radix_key_type>::max() };
+    using allocator_type = std::pmr::polymorphic_allocator<radix_type>;
+    auto constexpr max{ std::numeric_limits<radix_type>::max() };
+    std::size_t constexpr max_as_size{ max };
 
-    radix_key_type buf[static_cast<std::size_t>(max) + 1];
-    std::pmr::monotonic_buffer_resource res{ buf, max + 1, std::pmr::null_memory_resource() };
+    radix_type buf[max_as_size + 1];
+    std::pmr::monotonic_buffer_resource res{ buf, max_as_size + 1,
+                                             std::pmr::null_memory_resource() };
     allocator_type alloc{ &res };
-    counting_sort_t<radix_key_type, allocator_type> sort{ alloc };
+    counting_sort_t<radix_type, allocator_type> sort{ alloc };
 
-    std::decay_t<Rng> out(size(r));
-    auto const digits{ std::numeric_limits<key_type>::digits };
-    for (auto const radix : iota(0, digits) | stride(8))
+    for (auto const cur_radix : Traits::template radices<key_type>)
     {
         sort(
             r, max,
-            [&key_fn, radix](auto const& el) -> radix_key_type
-            { return (key_fn(el) >> radix) & static_cast<key_type>(0xFF); },
+            [&key_fn, cur_radix](auto const& el)
+            { return Traits::template radix<key_type>(cur_radix)(key_fn(el)); },
             proj);
         res.release();
     }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstdlib>
 #include <format>
 #include <iostream>
@@ -51,6 +52,14 @@ bool
 is_power_of_2(T const v)
 {
     return v > 0 && !(v & (v - 1));
+}
+
+///! @pre l != 0 && r != 0
+constexpr std::size_t
+divceil(std::size_t const l, std::size_t const r)
+{
+    assert(l != 0 && r != 0);
+    return 1 + ((l - 1) / r);
 }
 
 } // namespace tt::detail
