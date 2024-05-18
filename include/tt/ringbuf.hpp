@@ -425,7 +425,7 @@ public:
     reference
     operator->()
     {
-        return &(operator*());
+        return (operator*());
     }
 
     this_type&
