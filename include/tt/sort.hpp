@@ -3,6 +3,7 @@
 #include <tt/detail.hpp>
 
 #include <algorithm>
+#include <array>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -15,7 +16,7 @@ namespace tt
 
 /*
     First of all, I need say, that typical choice of sorting algorithm is quick
-   sort. There a good article about it - https://en.wikipedia.org/wiki/Quicksort
+    sort. There a good article about it - https://en.wikipedia.org/wiki/Quicksort
 
     But I will not implement it here for several reasons:
       - it shows a good asymptotics independency of data type,
@@ -24,7 +25,7 @@ namespace tt
 
       - this is just boring, anyone know about quick sort))
 
-    So, I decide to implement three quite similar sort algorithms:
+    So, I decide to implement two quite similar sort algorithms:
       - counting
       - radix
 
@@ -172,11 +173,12 @@ radix_sort(Rng&& r, KeyFn key_fn = {}, Proj proj = {})
     using radix_type = typename Traits::radix_type;
 
     using allocator_type = std::pmr::polymorphic_allocator<radix_type>;
-    auto constexpr max{ std::numeric_limits<radix_type>::max() };
-    std::size_t constexpr max_as_size{ max };
 
-    radix_type buf[max_as_size + 1];
-    std::pmr::monotonic_buffer_resource res{ buf, max_as_size + 1,
+    constexpr auto max{ std::numeric_limits<radix_type>::max() };
+    constexpr auto buf_size{ static_cast<std::size_t>(max) + 1 };
+
+    std::array<radix_type, buf_size> buf;
+    std::pmr::monotonic_buffer_resource res{ buf.data(), buf.size(),
                                              std::pmr::null_memory_resource() };
     allocator_type alloc{ &res };
     counting_sort_t<radix_type, allocator_type> sort{ alloc };
