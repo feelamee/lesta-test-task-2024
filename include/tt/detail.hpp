@@ -7,6 +7,10 @@
 #include <source_location>
 #include <type_traits>
 
+#if __cpp_lib_stacktrace >= 202011L
+#include <stacktrace>
+#endif
+
 template <>
 struct std::formatter<std::source_location>
 {
@@ -44,6 +48,13 @@ using param = std::conditional_t<prefer_pass_by_value<T>, T const, T const&>;
 unimplemented(std::source_location src = std::source_location::current())
 {
     std::cerr << std::format("[unimplemented] {}\n", src);
+
+#if __cpp_lib_stacktrace >= 202011L
+    std::cerr << std::stacktrace::current() << std::endl;
+#elif __cpp_lib_formatters >= 202302L
+    std::cerr << std::format("{}\n", std::stacktrace::current());
+#endif
+
     std::exit(EXIT_FAILURE);
 }
 
