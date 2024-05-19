@@ -7,6 +7,7 @@ config("tt") {
         "include/tt/ringbuf.hpp",
         "include/tt/lock_free_ringbuf.hpp",
         "include/tt/iseven.hpp",
+        "include/tt/sort.hpp",
         "include/tt/detail.hpp",
     ]
 
@@ -28,6 +29,10 @@ config("doctest") {
 executable("tests") {
     sources = [
         "tests/main.test.cpp",
+        "tests/iseven.test.cpp",
+        "tests/ringbuf.test.cpp",
+        "tests/lock_free_ringbuf.test.cpp",
+        "tests/sort.test.cpp",
     ]
 
     configs = [

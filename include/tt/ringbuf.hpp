@@ -21,7 +21,6 @@ public:
 
     using allocator_traits = std::allocator_traits<allocator_type>;
     using value_type = allocator_traits::value_type;
-    using param_value_type = detail::param<value_type>;
 
     using pointer = allocator_traits::pointer;
     using const_pointer = allocator_traits::const_pointer;
@@ -147,9 +146,15 @@ public:
     }
 
     void
-    push_back(param_value_type value)
+    push_back(value_type const& v)
     {
-        emplace_back(value);
+        return emplace_back(v);
+    }
+
+    void
+    push_back(value_type&& v)
+    {
+        return emplace_back(std::forward<value_type>(v));
     }
 
     void
@@ -425,7 +430,7 @@ public:
     reference
     operator->()
     {
-        return &(operator*());
+        return (operator*());
     }
 
     this_type&
@@ -466,8 +471,6 @@ static_assert(std::random_access_iterator<ringbuf<int>::iterator<false>>);
 static_assert(std::random_access_iterator<ringbuf<int>::iterator<true>>);
 static_assert(std::sentinel_for<ringbuf<int>::iterator<false>, ringbuf<int>::iterator<false>>);
 static_assert(std::sentinel_for<ringbuf<int>::iterator<true>, ringbuf<int>::iterator<true>>);
-static_assert(std::input_or_output_iterator<ringbuf<int>::iterator<false>>);
-static_assert(std::input_or_output_iterator<ringbuf<int>::iterator<true>>);
 static_assert(std::ranges::range<tt::ringbuf<int>&>);
 
 } // namespace tt

@@ -1,10 +1,15 @@
 #pragma once
 
+#include <cassert>
 #include <cstdlib>
 #include <format>
 #include <iostream>
 #include <source_location>
 #include <type_traits>
+
+#if __cpp_lib_stacktrace >= 202011L
+#include <stacktrace>
+#endif
 
 template <>
 struct std::formatter<std::source_location>
@@ -43,6 +48,13 @@ using param = std::conditional_t<prefer_pass_by_value<T>, T const, T const&>;
 unimplemented(std::source_location src = std::source_location::current())
 {
     std::cerr << std::format("[unimplemented] {}\n", src);
+
+#if __cpp_lib_stacktrace >= 202011L
+    std::cerr << std::stacktrace::current() << std::endl;
+#elif __cpp_lib_formatters >= 202302L
+    std::cerr << std::format("{}\n", std::stacktrace::current());
+#endif
+
     std::exit(EXIT_FAILURE);
 }
 
@@ -51,6 +63,14 @@ bool
 is_power_of_2(T const v)
 {
     return v > 0 && !(v & (v - 1));
+}
+
+///! @pre l != 0 && r != 0
+constexpr std::size_t
+divceil(std::size_t const l, std::size_t const r)
+{
+    assert(l != 0 && r != 0);
+    return 1 + ((l - 1) / r);
 }
 
 } // namespace tt::detail
