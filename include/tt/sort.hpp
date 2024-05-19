@@ -27,7 +27,6 @@ namespace tt
     So, I decide to implement three quite similar sort algorithms:
       - counting
       - radix
-      - bucket
 
     Below, I will mediate about [dis]advantages of each.
     The most interesting awaits you in the end - benchmarks
@@ -46,7 +45,7 @@ namespace tt
     So, it have good asymptotic complexity, but..
     if k much bigger n, it will use a lot of memory for nothing
 */
-template <std::unsigned_integral KeyType, typename Alloc = std::allocator<std::byte>>
+template <std::unsigned_integral KeyType, typename Alloc = std::allocator<KeyType>>
 struct counting_sort_t
 {
 public:
@@ -67,19 +66,18 @@ public:
     constexpr void
     operator()(Rng&& r, key_type max, KeyFn key_fn = {}, Proj proj = {}) const
     {
-        using counter_alloc = std::allocator_traits<Alloc>::template rebind_alloc<key_type>;
-        using std::views::pairwise, std::views::transform, std::views::reverse;
+        using std::views::pairwise, std::views::transform, std::views::reverse, std::ranges::size;
 
-        std::vector<key_type, counter_alloc> count{ static_cast<std::size_t>(max) + 1, 0uz, alloc };
+        std::vector<key_type, Alloc> count{ static_cast<std::size_t>(max) + 1, 0uz, alloc };
 
         for (auto const& i : r | transform(proj) | transform(key_fn)) count[i] += 1;
 
         for (auto [l, r] : count | pairwise) r += l;
 
-        std::decay_t<Rng> out(r.size());
-        for (auto const& el : r | reverse | transform(proj))
+        std::decay_t<Rng> out(size(r));
+        for (auto const& el : r | reverse)
         {
-            auto& i{ count[key_fn(el)] };
+            auto& i{ count[std::invoke(key_fn, std::invoke(proj, el))] };
             --i;
             out[i] = std::move(el);
         }
@@ -125,6 +123,8 @@ inline constexpr counting_sort_t<std::size_t> counting_sort{};
     but try to solve it problem - additional memory.
  */
 
+// TODO: receive traits as value parameter instead of type?
+//       this will allow to choose behaviour in runtime
 template <typename T, typename KeyType>
 concept radix_sort_traits = requires(std::size_t cur_radix, KeyType key) {
     typename T::radix_type;
@@ -186,7 +186,7 @@ radix_sort(Rng&& r, KeyFn key_fn = {}, Proj proj = {})
         sort(
             r, max,
             [&key_fn, cur_radix](auto const& el)
-            { return Traits::template radix<key_type>(cur_radix)(key_fn(el)); },
+            { return Traits::template radix<key_type>(cur_radix)(std::invoke(key_fn, el)); },
             proj);
         res.release();
     }
