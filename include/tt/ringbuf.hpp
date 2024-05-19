@@ -466,8 +466,6 @@ static_assert(std::random_access_iterator<ringbuf<int>::iterator<false>>);
 static_assert(std::random_access_iterator<ringbuf<int>::iterator<true>>);
 static_assert(std::sentinel_for<ringbuf<int>::iterator<false>, ringbuf<int>::iterator<false>>);
 static_assert(std::sentinel_for<ringbuf<int>::iterator<true>, ringbuf<int>::iterator<true>>);
-static_assert(std::input_or_output_iterator<ringbuf<int>::iterator<false>>);
-static_assert(std::input_or_output_iterator<ringbuf<int>::iterator<true>>);
 static_assert(std::ranges::range<tt::ringbuf<int>&>);
 
 } // namespace tt
