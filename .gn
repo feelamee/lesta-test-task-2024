@@ -1,7 +1,0 @@
-buildconfig = "//build/BUILDCONFIG.gn"
-
-default_args = {
-    is_debug = true
-}
-
-export_compile_commands = [ "//*" ]
