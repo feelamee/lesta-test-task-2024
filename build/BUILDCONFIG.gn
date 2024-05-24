@@ -1,2 +1,0 @@
-#set_default_toolchain("toolchain:clang")
-set_default_toolchain("toolchain:gcc")
