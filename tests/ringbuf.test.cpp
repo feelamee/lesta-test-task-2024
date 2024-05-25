@@ -41,7 +41,7 @@ TEST_SUITE("ringbuf")
             custom_allocator alloc1;
             alloc1.id = 42; // missing initializer on gcc when using designated initializer
             custom_allocator alloc2;
-            alloc1.id = 69; // missing initializer on gcc when using designated initializer
+            alloc2.id = 69; // missing initializer on gcc when using designated initializer
             tt::ringbuf<value_type, custom_allocator> buf(42, alloc1);
             REQUIRE_EQ(alloc1.id, buf.get_allocator().id);
             REQUIRE_NE(alloc2.id, buf.get_allocator().id);
