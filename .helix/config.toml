@@ -1,2 +1,0 @@
-[keys.normal."+"]
-r = ":run-shell-command ninja -C target/ &> /dev/stdout && target/tests &> /dev/stdout; true"

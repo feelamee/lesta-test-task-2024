@@ -1,6 +1,6 @@
-#include <tt/lock_free_ringbuf.hpp>
+#include <doctest/doctest.h>
 
-#include "doctest.h"
+#include <tt/lock_free_ringbuf.hpp>
 
 #include <thread>
 #include <vector>

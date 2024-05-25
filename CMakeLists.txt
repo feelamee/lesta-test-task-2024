@@ -5,9 +5,7 @@ project(
     DESCRIPTION "test task for Lesta Games")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
-
 set(CMAKE_CXX_EXTENSIONS FALSE)
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/tests)
 # add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/bench)
@@ -26,5 +24,4 @@ target_compile_options(
     tt
     INTERFACE -Wall
               -pedantic
-              -Werror
-              -nostdlib++)
+              -Werror)

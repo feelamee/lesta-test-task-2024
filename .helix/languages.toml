@@ -1,0 +1,2 @@
+[language-server.clangd]
+args = [ "--compile-commands-dir=build/Debug", "--header-insertion=iwyu", "--clang-tidy" ]

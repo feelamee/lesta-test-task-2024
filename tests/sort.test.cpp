@@ -1,6 +1,6 @@
-#include <tt/sort.hpp>
+#include <doctest/doctest.h>
 
-#include "doctest.h"
+#include <tt/sort.hpp>
 
 #include <algorithm>
 #include <format>

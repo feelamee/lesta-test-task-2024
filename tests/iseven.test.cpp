@@ -1,6 +1,6 @@
-#include <tt/iseven.hpp>
+#include <doctest/doctest.h>
 
-#include "doctest.h"
+#include <tt/iseven.hpp>
 
 TEST_SUITE("iseven")
 {

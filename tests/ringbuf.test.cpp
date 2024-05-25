@@ -1,6 +1,6 @@
-#include <tt/ringbuf.hpp>
+#include <doctest/doctest.h>
 
-#include "doctest.h"
+#include <tt/ringbuf.hpp>
 
 #include <ranges>
 
