@@ -12,7 +12,16 @@ target_sources(
             ${TESTS_SOURCE_DIR}/ringbuf.test.cpp
             ${TESTS_SOURCE_DIR}/sort.test.cpp)
 
-target_link_libraries(tests PRIVATE tt)
-
 find_package(doctest REQUIRED)
-target_link_libraries(tests PRIVATE doctest::doctest)
+target_link_libraries(tests PRIVATE tt doctest::doctest)
+
+# TODO: use cmake presets instead of this...
+if(TT_TESTS_PEDANTIC)
+    message(STATUS "tests: enabled pedantic mode")
+    target_link_libraries(tests PRIVATE pedantic)
+endif()
+
+if(TT_TESTS_ASAN)
+    message(STATUS "tests: enabled address sanitizer")
+    target_link_libraries(tests PRIVATE asan)
+endif()
