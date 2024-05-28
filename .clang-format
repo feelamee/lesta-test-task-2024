@@ -53,18 +53,21 @@ ExperimentalAutoDetectBinPacking: false
 
 IncludeBlocks: Regroup
 IncludeCategories: 
-  - Regex:           '^<doctest/'
+  - Regex:           '^<benchmark/'
     Priority:        1
     SortPriority:    1
-  - Regex:           '^<tt'
+  - Regex:           '^<doctest/'
     Priority:        2
     SortPriority:    2
-  - Regex:           '^"'
+  - Regex:           '^<tt'
     Priority:        3
     SortPriority:    3
-  - Regex:           '.*'
+  - Regex:           '^"'
     Priority:        4
     SortPriority:    4
+  - Regex:           '.*'
+    Priority:        5
+    SortPriority:    5
 
 IncludeIsMainRegex: '$'
 IndentCaseLabels: false
