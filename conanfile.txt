@@ -1,5 +1,9 @@
 [test_requires]
 doctest/2.4.11
+benchmark/1.8.3
+
+[tool_requires]
+cmake/[>=3.5]
 
 [generators]
 CMakeDeps
