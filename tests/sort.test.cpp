@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <format>
 #include <iostream>
+#include <memory_resource>
+#include <random>
 #include <ranges>
 #include <sstream>
 #include <vector>
@@ -41,10 +43,10 @@ TEST_SUITE("sort")
     {
         using std::views::all;
 
-        std::vector<int> const ar;
+        std::vector<uint> const ar;
         REQUIRE(ar.empty());
-        std::vector<int> res{ ar };
-        tt::counting_sort(res, 0);
+        std::vector<uint> res(ar.size());
+        tt::counting_sort(ar, begin(res), 0);
         REQUIRE(std::ranges::is_sorted(res));
     }
 
@@ -54,16 +56,16 @@ TEST_SUITE("sort")
         struct num
         {
             num() = default;
-            num(int p_n)
+            num(uint p_n)
                 : n{ p_n }
             {
             }
-            int n{ 0 };
+            uint n{ 0 };
         };
         std::vector<num> const ar{ 3, 5, 1, 8, 10, 0, 14 };
         auto const max{ *std::ranges::max_element(ar, {}, &num::n) };
-        std::vector<num> res{ ar };
-        tt::counting_sort(res, max.n, {}, &num::n);
+        std::vector<num> res(ar.size());
+        tt::counting_sort(ar, begin(res), max.n, {}, &num::n);
         REQUIRE(std::ranges::is_sorted(res, {}, &num::n));
     }
 
@@ -71,10 +73,10 @@ TEST_SUITE("sort")
     {
         using std::views::all;
 
-        std::vector<int> const ar{ 3, 5, 1, 8, 10, 0, 14 };
+        std::vector<uint> const ar{ 3, 5, 1, 8, 10, 0, 14 };
         auto const max{ *std::ranges::max_element(ar) };
-        std::vector<int> res{ ar };
-        tt::counting_sort(res, max);
+        std::vector<uint> res(ar.size());
+        tt::counting_sort(ar, begin(res), max);
         REQUIRE(std::ranges::is_sorted(res));
     }
 
@@ -82,11 +84,47 @@ TEST_SUITE("sort")
     {
         using std::views::all;
 
-        std::vector<int> const ar{ 3, 5, 1, 8, 10, 0, 14 };
-        std::vector<int> res{ ar };
-        tt::counting_sort(res);
+        std::vector<uint> const ar{ 3, 5, 1, 8, 10, 0, 14 };
+        std::vector<uint> res(ar.size());
+        tt::counting_sort(ar, begin(res));
         REQUIRE(std::ranges::is_sorted(res));
     }
+
+    TEST_CASE("counting sort with big array")
+    {
+        using std::views::all;
+
+        std::vector<uint> ar(10000);
+        std::ranges::generate(ar, [] { return std::rand() % 1000000; });
+
+        std::vector<uint> res(ar.size());
+        tt::counting_sort(ar, begin(res));
+        REQUIRE(std::ranges::is_sorted(res));
+    }
+
+    TEST_CASE("custom counting sort with big array")
+    {
+        using std::views::all;
+
+        std::vector<uint> ar(10000);
+        std::ranges::generate(ar, [] { return std::rand() % 1000000; });
+
+        std::vector<uint> res(ar.size());
+
+        tt::counting_sort_t<uint, std::pmr::polymorphic_allocator<uint>> sort;
+        sort(ar, begin(res));
+        REQUIRE(std::ranges::is_sorted(res));
+    }
+
+    // TODO: see compile errors of this test and concrete requires of input type for sort
+    // TEST_CASE("counting sort shuffled view")
+    // {
+    //     using std::views::iota, std::ranges::shuffle;
+
+    //     auto ar = iota(0, 100);
+    //     tt::counting_sort(ar);
+    //     REQUIRE(std::ranges::is_sorted(ar));
+    // }
 
     TEST_CASE("radix sort")
     {
@@ -97,41 +135,20 @@ TEST_SUITE("sort")
             return input;
         };
 
-        SUBCASE("1")
+        std::vector<int> ar;
+
+        SUBCASE("random1") { ar = { 3, 5, 1, 8, 10, 0, 14 }; }
+        SUBCASE("random2") { ar = { 8, 7, 6, 5, 4, 3, 2, 1 }; }
+        SUBCASE("2-3th radix") { ar = { 508, 507, 606, 505 }; }
+        SUBCASE("random")
         {
-            std::vector<int> const ar{ 3, 5, 1, 8, 10, 0, 14 };
-            std::vector<int> res{ ar };
-            tt::radix_sort(res);
-            CHECK_EQ(res, sorted(ar));
+            ar.resize(10000);
+            std::ranges::generate(ar, [] { return std::rand() % 10000; });
         }
-        SUBCASE("2")
-        {
-            std::vector<int> const ar{ 8, 7, 6, 5, 4, 3, 2, 1 };
-            std::vector<int> res{ ar };
-            tt::radix_sort(res);
-            CHECK_EQ(res, sorted(ar));
-        }
-        SUBCASE("3")
-        {
-            std::vector<int> const ar{ 508, 507, 606, 505 };
-            std::vector<int> res{ ar };
-            tt::radix_sort(res);
-            CHECK_EQ(res, sorted(ar));
-        }
-        SUBCASE("4")
-        {
-            std::vector<int> ar(10);
-            std::ranges::generate(ar, [] { return std::rand() % 1000; });
-            std::vector<int> res{ ar };
-            tt::radix_sort(res);
-            CHECK_EQ(res, sorted(ar));
-        }
-        SUBCASE("5")
-        {
-            std::vector<int> ar{ 5321, 4, 41, 510, 140, 0, 43, 3, 31231 };
-            std::vector<int> res{ ar };
-            tt::radix_sort(res);
-            CHECK_EQ(res, sorted(ar));
-        }
+        SUBCASE("different radices") { ar = { 5321, 4, 41, 510, 140, 0, 43, 3, 31231 }; }
+
+        std::vector<int> res(ar.size());
+        tt::radix_sort(std::vector{ ar }, begin(res));
+        CHECK_EQ(res, sorted(ar));
     }
 }

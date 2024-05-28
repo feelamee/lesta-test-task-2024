@@ -58,47 +58,55 @@ public:
     using key_type = KeyType;
 
     // TODO: think about adding execution policy
-    template <typename Rng, typename KeyFn = std::identity, typename Proj = std::identity>
+    template <typename Rng, typename Out, typename KeyFn = std::identity,
+              typename Proj = std::identity>
         requires requires(KeyFn key_fn, Proj proj, std::ranges::range_value_t<Rng> v) {
             {
                 std::invoke(key_fn, std::invoke(proj, v))
             } -> std::convertible_to<key_type>;
-        }
+        } && std::indirectly_writable<Out, std::ranges::range_value_t<Rng>>
     constexpr void
-    operator()(Rng&& r, key_type max, KeyFn key_fn = {}, Proj proj = {}) const
+    operator()(Rng&& r, Out out, key_type max, KeyFn key_fn = {}, Proj proj = {}) const
     {
-        using std::views::pairwise, std::views::transform, std::views::reverse, std::ranges::size;
+        using std::views::pairwise, std::views::transform, std::views::reverse, std::ranges::size,
+            std::ranges::begin;
 
-        std::vector<key_type, Alloc> count{ static_cast<std::size_t>(max) + 1, 0uz, alloc };
+        using allocator_type = std::allocator_traits<Alloc>::template rebind_alloc<std::size_t>;
+        std::vector<std::size_t, allocator_type> count{ static_cast<std::size_t>(max) + 1, 0uz,
+                                                        alloc };
 
         for (auto const& i : r | transform(proj) | transform(key_fn)) count[i] += 1;
 
         for (auto [l, r] : count | pairwise) r += l;
 
-        std::decay_t<Rng> out(size(r));
-        for (auto const& el : r | reverse)
+        for (auto&& el : r | reverse)
         {
             auto& i{ count[std::invoke(key_fn, std::invoke(proj, el))] };
             --i;
-            out[i] = std::move(el);
+            out[i] = std::forward<decltype(el)>(el);
         }
-        std::ranges::move(out, begin(r));
     }
 
-    template <typename Rng, typename KeyFn = std::identity, typename Proj = std::identity>
+    template <typename Rng, typename Out, typename KeyFn = std::identity,
+              typename Proj = std::identity>
         requires requires(KeyFn key_fn, Proj proj, std::ranges::range_value_t<Rng> v) {
             {
                 std::invoke(key_fn, std::invoke(proj, v))
             } -> std::convertible_to<key_type>;
-        }
+        } && std::indirectly_writable<Out, std::ranges::range_value_t<Rng>>
     constexpr void
-    operator()(Rng&& r, KeyFn key_fn = {}, Proj proj = {}) const
+    operator()(Rng&& r, Out out, KeyFn key_fn = {}, Proj proj = {}) const
     {
-        auto const composed = [&key_fn, &proj](auto const& el) { return key_fn(proj(el)); };
+        using std::ranges::end;
+
+        auto const composed = [&key_fn, &proj](auto const& el)
+        { return std::invoke(key_fn, std::invoke(proj, el)); };
+
         auto const max{ std::ranges::max_element(r, {}, composed) };
         if (max != end(r))
         {
-            (*this)(std::forward<Rng>(r), std::move(*max), std::move(key_fn), std::move(proj));
+            (*this)(std::forward<Rng>(r), std::move(out), std::move(*max), std::move(key_fn),
+                    std::move(proj));
         }
     }
 
@@ -110,7 +118,7 @@ inline constexpr counting_sort_t<std::size_t> counting_sort{};
 /*
     Radix sort
 
-    time - O(r * k * n)
+    time - O(r * (k + n))
     space - O(1)
 
     where r is count of radices in radix_key_type
@@ -126,72 +134,88 @@ inline constexpr counting_sort_t<std::size_t> counting_sort{};
 
 // TODO: receive traits as value parameter instead of type?
 //       this will allow to choose behaviour in runtime
-template <typename T, typename KeyType>
-concept radix_sort_traits = requires(std::size_t cur_radix, KeyType key) {
-    typename T::radix_type;
-    requires std::ranges::input_range<decltype(T::template radices<KeyType>)>;
+template <typename R>
+concept radix_sort_traits = requires(R r, std::size_t n) {
+    requires std::unsigned_integral<typename R::radix_type>;
+    typename R::key_type;
     {
-        std::invoke(std::invoke(T::template radix<KeyType>, cur_radix), key)
-    } -> std::same_as<typename T::radix_type>;
+        r.radices()
+    } -> std::ranges::range;
+    {
+        r.nth_radix_proj(n)(std::declval<typename R::key_type>())
+    } -> std::same_as<typename R::radix_type>;
 };
 
+template <typename KeyType>
 struct default_radix_sort_traits
 {
     using radix_type = std::uint8_t;
+    using key_type = KeyType;
 
-    template <typename KeyType>
-    inline static constexpr auto radices{
-        std::views::iota(0UL, detail::divceil(sizeof(KeyType), sizeof(radix_type)))
+    constexpr auto
+    radices()
+    {
+        return std::views::iota(0UL, detail::divceil(sizeof(key_type), sizeof(radix_type)));
     };
 
-    template <typename KeyType>
-    inline static constexpr auto radix = [](std::size_t const cur_radix)
+    constexpr auto
+    nth_radix_proj(std::size_t const cur_radix)
     {
         return [=](auto const key) -> radix_type
-        { return (key >> (cur_radix * 8)) & static_cast<KeyType>(0xFF); };
+        { return (key >> (cur_radix * 8)) & static_cast<key_type>(0xFF); };
     };
 };
-static_assert(radix_sort_traits<default_radix_sort_traits, std::size_t>);
+static_assert(radix_sort_traits<default_radix_sort_traits<std::size_t>>);
 
-template <typename Rng, typename KeyFn = std::identity, typename Proj = std::identity,
-          typename Traits = default_radix_sort_traits>
-    requires requires(KeyFn key_fn, Proj proj, std::ranges::range_value_t<Rng> v) {
+namespace detail
+{
+template <typename KeyFn, typename Proj, typename Rng>
+using key_type =
+    std::invoke_result_t<KeyFn, std::invoke_result_t<Proj, std::ranges::range_value_t<Rng>>>;
+}
+
+template <typename Rng, typename Out, typename KeyFn = std::identity, typename Proj = std::identity,
+          radix_sort_traits Traits = default_radix_sort_traits<detail::key_type<KeyFn, Proj, Rng>>>
+
+    requires requires(KeyFn key_fn, Proj proj, Traits traits, std::ranges::range_value_t<Rng> v,
+                      std::size_t cur) {
         {
-            std::invoke(key_fn, std::invoke(proj, v))
-        } -> std::convertible_to<typename Traits::radix_type>;
+            traits.nth_radix_proj(cur)(std::invoke(key_fn, std::invoke(proj, v)))
+        } -> std::same_as<typename Traits::radix_type>;
+
+        requires std::indirectly_writable<Out, std::ranges::range_value_t<Rng>>;
+        requires std::indirectly_swappable<std::ranges::iterator_t<Rng>, Out>;
     }
 constexpr void
-radix_sort(Rng&& r, KeyFn key_fn = {}, Proj proj = {})
+radix_sort(Rng&& r, Out out, KeyFn key_fn = {}, Proj proj = {}, Traits traits = {})
 {
-    using std::views::iota, std::views::stride, std::ranges::size, std::ranges::move;
+    using std::ranges::size, std::ranges::copy_n, std::ranges::begin, std::ranges::move,
+        std::ranges::next;
 
-    using value_type = std::ranges::range_value_t<Rng>;
-    using proj_result = std::invoke_result_t<Proj, value_type>;
-    using key_fn_result = std::invoke_result_t<KeyFn, proj_result>;
-    using key_type = std::decay_t<key_fn_result>;
-    static_assert(radix_sort_traits<Traits, key_type>);
     using radix_type = typename Traits::radix_type;
-
-    using allocator_type = std::pmr::polymorphic_allocator<radix_type>;
 
     constexpr auto max{ std::numeric_limits<radix_type>::max() };
     constexpr auto buf_size{ static_cast<std::size_t>(max) + 1 };
 
-    std::array<radix_type, buf_size> buf;
-    std::pmr::monotonic_buffer_resource res{ buf.data(), buf.size(),
-                                             std::pmr::null_memory_resource() };
-    allocator_type alloc{ &res };
-    counting_sort_t<radix_type, allocator_type> sort{ alloc };
+    using buf_value_type = std::size_t;
+    std::array<buf_value_type, buf_size> buf;
+    std::pmr::monotonic_buffer_resource resource{ buf.data(), buf.size() * sizeof(buf_value_type),
+                                                  std::pmr::null_memory_resource() };
 
-    for (auto const cur_radix : Traits::template radices<key_type>)
+    using allocator_type = std::pmr::polymorphic_allocator<buf_value_type>;
+    counting_sort_t<radix_type, allocator_type> sort{ &resource };
+
+    for (auto const cur_radix : traits.radices())
     {
         sort(
-            r, max,
-            [&key_fn, cur_radix](auto const& el)
-            { return Traits::template radix<key_type>(cur_radix)(std::invoke(key_fn, el)); },
+            r, out, max,
+            [&key_fn, cur_radix, &traits](auto const& el)
+            { return traits.nth_radix_proj(cur_radix)(std::invoke(key_fn, el)); },
             proj);
-        res.release();
-    }
-}
 
+        move(out, next(out, size(r)), begin(r));
+        resource.release();
+    }
+    move(r, out);
+}
 } // namespace tt
