@@ -46,7 +46,7 @@ TEST_SUITE("sort")
         std::vector<uint> const ar;
         REQUIRE(ar.empty());
         std::vector<uint> res(ar.size());
-        tt::counting_sort(ar, begin(res), 0);
+        tt::counting_sort(ar, begin(res), 0u);
         REQUIRE(std::ranges::is_sorted(res));
     }
 
@@ -111,8 +111,9 @@ TEST_SUITE("sort")
 
         std::vector<uint> res(ar.size());
 
-        tt::counting_sort_t<uint, std::pmr::polymorphic_allocator<uint>> sort;
-        sort(ar, begin(res));
+        std::pmr::polymorphic_allocator<std::size_t> alloc;
+
+        tt::counting_sort(ar, begin(res), {}, {}, alloc);
         REQUIRE(std::ranges::is_sorted(res));
     }
 

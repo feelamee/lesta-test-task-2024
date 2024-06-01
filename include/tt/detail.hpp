@@ -73,4 +73,11 @@ divceil(std::size_t const l, std::size_t const r)
     return 1 + ((l - 1) / r);
 }
 
+template <typename F1, typename F2, typename... Args>
+concept composable =
+    std::invocable<F2, Args...> && std::invocable<F1, std::invoke_result_t<F2, Args...>>;
+
+template <typename F1, typename F2, typename... Args>
+using compose_result_t = std::invoke_result_t<F1, std::invoke_result_t<F2, Args...>>;
+
 } // namespace tt::detail

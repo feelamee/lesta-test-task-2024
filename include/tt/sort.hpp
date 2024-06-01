@@ -9,7 +9,6 @@
 #include <memory>
 #include <memory_resource>
 #include <ranges>
-#include <type_traits>
 
 namespace tt
 {
@@ -46,75 +45,52 @@ namespace tt
     So, it have good asymptotic complexity, but..
     if k much bigger n, it will use a lot of memory for nothing
 */
-template <std::unsigned_integral KeyType, typename Alloc = std::allocator<std::size_t>>
-struct counting_sort_t
+// TODO: think about adding execution policy
+template <typename Rng, typename Out, std::unsigned_integral KeyType, typename KeyFn = std::identity,
+          typename Proj = std::identity, template <typename> typename Alloc = std::allocator>
+    requires detail::composable<KeyFn, Proj, std::ranges::range_value_t<Rng>> &&
+             std::constructible_from<KeyType, detail::compose_result_t<KeyFn, Proj, std::ranges::range_value_t<Rng>>> &&
+             std::indirectly_writable<Out, std::ranges::range_value_t<Rng>>
+constexpr void
+counting_sort(Rng&& r, Out out, KeyType max, KeyFn key_fn = {}, Proj proj = {},
+              Alloc<std::size_t> const& alloc = {})
 {
-public:
-    constexpr counting_sort_t(Alloc const& p_alloc = Alloc{})
-        : alloc{ p_alloc }
+    namespace vs = std::views;
+    using allocator_type = Alloc<std::size_t>;
+
+    std::vector<std::size_t, allocator_type> count{ static_cast<std::size_t>(max) + 1, 0uz, alloc };
+
+    for (auto const& i : r | vs::transform(proj) | vs::transform(key_fn)) count[i] += 1;
+
+    for (auto [l, r] : count | vs::pairwise) r += l;
+
+    for (auto&& el : r | vs::reverse)
     {
+        auto& i{ count[std::invoke(key_fn, std::invoke(proj, el))] };
+        --i;
+        out[i] = std::forward<decltype(el)>(el);
     }
+}
 
-    using key_type = KeyType;
+template <typename Rng, typename Out, typename KeyFn = std::identity, typename Proj = std::identity,
+          template <typename> typename Alloc = std::allocator>
+    requires detail::composable<KeyFn, Proj, std::ranges::range_value_t<Rng>> &&
+             std::indirectly_writable<Out, std::ranges::range_value_t<Rng>>
+constexpr void
+counting_sort(Rng&& r, Out out, KeyFn key_fn = {}, Proj proj = {}, Alloc<std::size_t> const& alloc = {})
+{
+    namespace rng = std::ranges;
 
-    // TODO: think about adding execution policy
-    template <typename Rng, typename Out, typename KeyFn = std::identity,
-              typename Proj = std::identity>
-        requires requires(KeyFn key_fn, Proj proj, std::ranges::range_value_t<Rng> v) {
-            {
-                std::invoke(key_fn, std::invoke(proj, v))
-            } -> std::convertible_to<key_type>;
-        } && std::indirectly_writable<Out, std::ranges::range_value_t<Rng>>
-    constexpr void
-    operator()(Rng&& r, Out out, key_type max, KeyFn key_fn = {}, Proj proj = {}) const
+    auto const composed = [&key_fn, &proj](auto const& el)
+    { return std::invoke(key_fn, std::invoke(proj, el)); };
+
+    auto const max{ rng::max_element(r, {}, composed) };
+    if (max != rng::end(r))
     {
-        using std::views::pairwise, std::views::transform, std::views::reverse, std::ranges::size,
-            std::ranges::begin;
-
-        using allocator_type = std::allocator_traits<Alloc>::template rebind_alloc<std::size_t>;
-        std::vector<std::size_t, allocator_type> count{ static_cast<std::size_t>(max) + 1, 0uz,
-                                                        alloc };
-
-        for (auto const& i : r | transform(proj) | transform(key_fn)) count[i] += 1;
-
-        for (auto [l, r] : count | pairwise) r += l;
-
-        for (auto&& el : r | reverse)
-        {
-            auto& i{ count[std::invoke(key_fn, std::invoke(proj, el))] };
-            --i;
-            out[i] = std::forward<decltype(el)>(el);
-        }
+        counting_sort(std::forward<Rng>(r), std::move(out), std::move(*max), std::move(key_fn),
+                      std::move(proj), alloc);
     }
-
-    template <typename Rng, typename Out, typename KeyFn = std::identity,
-              typename Proj = std::identity>
-        requires requires(KeyFn key_fn, Proj proj, std::ranges::range_value_t<Rng> v) {
-            {
-                std::invoke(key_fn, std::invoke(proj, v))
-            } -> std::convertible_to<key_type>;
-        } && std::indirectly_writable<Out, std::ranges::range_value_t<Rng>>
-    constexpr void
-    operator()(Rng&& r, Out out, KeyFn key_fn = {}, Proj proj = {}) const
-    {
-        using std::ranges::end;
-
-        auto const composed = [&key_fn, &proj](auto const& el)
-        { return std::invoke(key_fn, std::invoke(proj, el)); };
-
-        auto const max{ std::ranges::max_element(r, {}, composed) };
-        if (max != end(r))
-        {
-            (*this)(std::forward<Rng>(r), std::move(out), std::move(*max), std::move(key_fn),
-                    std::move(proj));
-        }
-    }
-
-private:
-    Alloc alloc;
-};
-inline constexpr counting_sort_t<std::size_t> counting_sort{};
-
+}
 /*
     Radix sort
 
@@ -132,7 +108,7 @@ inline constexpr counting_sort_t<std::size_t> counting_sort{};
     but try to solve it problem - additional memory.
  */
 template <typename R>
-concept radix_sort_traits = requires(R r, std::size_t n) {
+concept radix_traits = requires(R r, std::size_t n) {
     requires std::unsigned_integral<typename R::radix_type>;
     typename R::key_type;
     {
@@ -144,7 +120,7 @@ concept radix_sort_traits = requires(R r, std::size_t n) {
 };
 
 template <typename KeyType>
-struct default_radix_sort_traits
+struct byte_radix_traits
 {
     using radix_type = std::uint8_t;
     using key_type = KeyType;
@@ -162,20 +138,12 @@ struct default_radix_sort_traits
         { return (key >> (cur_radix * 8)) & static_cast<key_type>(0xFF); };
     };
 };
-static_assert(radix_sort_traits<default_radix_sort_traits<std::size_t>>);
-
-namespace detail
-{
-template <typename KeyFn, typename Proj, typename Rng>
-using key_type =
-    std::invoke_result_t<KeyFn, std::invoke_result_t<Proj, std::ranges::range_value_t<Rng>>>;
-}
+static_assert(radix_traits<byte_radix_traits<std::size_t>>);
 
 template <typename Rng, typename Out, typename KeyFn = std::identity, typename Proj = std::identity,
-          radix_sort_traits Traits = default_radix_sort_traits<detail::key_type<KeyFn, Proj, Rng>>>
+          radix_traits Traits = byte_radix_traits<detail::compose_result_t<KeyFn, Proj, std::ranges::range_value_t<Rng>>>>
 
-    requires requires(KeyFn key_fn, Proj proj, Traits traits, std::ranges::range_value_t<Rng> v,
-                      std::size_t cur) {
+    requires requires(KeyFn key_fn, Proj proj, Traits traits, std::ranges::range_value_t<Rng> v, std::size_t cur) {
         {
             traits.nth_radix_proj(cur)(std::invoke(key_fn, std::invoke(proj, v)))
         } -> std::same_as<typename Traits::radix_type>;
@@ -186,9 +154,7 @@ template <typename Rng, typename Out, typename KeyFn = std::identity, typename P
 constexpr void
 radix_sort(Rng&& r, Out out, KeyFn key_fn = {}, Proj proj = {}, Traits traits = {})
 {
-    using std::ranges::size, std::ranges::copy_n, std::ranges::begin, std::ranges::move,
-        std::ranges::next;
-
+    namespace rng = std::ranges;
     using radix_type = typename Traits::radix_type;
 
     constexpr auto max{ std::numeric_limits<radix_type>::max() };
@@ -200,19 +166,19 @@ radix_sort(Rng&& r, Out out, KeyFn key_fn = {}, Proj proj = {}, Traits traits = 
                                                   std::pmr::null_memory_resource() };
 
     using allocator_type = std::pmr::polymorphic_allocator<buf_value_type>;
-    counting_sort_t<radix_type, allocator_type> sort{ &resource };
+    allocator_type alloc{ &resource };
 
     for (auto const cur_radix : traits.radices())
     {
-        sort(
+        counting_sort(
             r, out, max,
             [&key_fn, cur_radix, &traits](auto const& el)
             { return traits.nth_radix_proj(cur_radix)(std::invoke(key_fn, el)); },
-            proj);
+            proj, alloc);
 
-        move(out, next(out, size(r)), begin(r));
+        rng::move(out, rng::next(out, rng::size(r)), rng::begin(r));
         resource.release();
     }
-    move(r, out);
+    rng::move(r, out);
 }
 } // namespace tt
