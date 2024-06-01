@@ -20,6 +20,7 @@ AllowShortFunctionsOnASingleLine: true
 AllowShortIfStatementsOnASingleLine: true
 AllowShortLoopsOnASingleLine: true
 AllowShortLambdasOnASingleLine: true
+AllowShortCompoundRequirementOnASingleLine: true
 AlwaysBreakAfterReturnType: AllDefinitions
 AlwaysBreakBeforeMultilineStrings: false
 AlwaysBreakTemplateDeclarations: true

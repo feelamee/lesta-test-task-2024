@@ -46,7 +46,7 @@ namespace tt
     So, it have good asymptotic complexity, but..
     if k much bigger n, it will use a lot of memory for nothing
 */
-template <std::unsigned_integral KeyType, typename Alloc = std::allocator<KeyType>>
+template <std::unsigned_integral KeyType, typename Alloc = std::allocator<std::size_t>>
 struct counting_sort_t
 {
 public:
@@ -131,9 +131,6 @@ inline constexpr counting_sort_t<std::size_t> counting_sort{};
     Radix sort is pretty similar to counting,
     but try to solve it problem - additional memory.
  */
-
-// TODO: receive traits as value parameter instead of type?
-//       this will allow to choose behaviour in runtime
 template <typename R>
 concept radix_sort_traits = requires(R r, std::size_t n) {
     requires std::unsigned_integral<typename R::radix_type>;
